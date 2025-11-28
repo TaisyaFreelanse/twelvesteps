@@ -122,11 +122,22 @@ class TrackerService:
     ) -> List[TrackerSummary]:
         """
         Get tracker summaries for a period.
-        Note: This requires adding a method to repository.
+        
+        Args:
+            user_id: User ID
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+            
+        Returns:
+            List of TrackerSummary records
         """
-        # For now, return empty list - can be enhanced with repository method
-        # This would require adding a query method to TrackerSummaryRepository
-        return []
+        return await self.repo.get_summaries_for_period(user_id, start_date, end_date)
+    
+    async def get_last_week_summaries(self, user_id: int) -> List[TrackerSummary]:
+        """Get summaries for the last 7 days."""
+        end = date.today()
+        start = end - timedelta(days=7)
+        return await self.repo.get_summaries_for_period(user_id, start, end)
     
     async def aggregate_by_category(
         self,
@@ -136,15 +147,99 @@ class TrackerService:
     ) -> Dict[str, List[str]]:
         """
         Aggregate data by category for a period.
-        Returns dict with keys: thinking, feeling, behavior, relationships, health
+        Combines all entries from multiple days into single lists per category.
+        
+        Args:
+            user_id: User ID
+            start_date: Start date
+            end_date: End date
+            
+        Returns:
+            Dict with keys: thinking, feeling, behavior, relationships, health
+            Each contains a list of unique entries from the period
         """
-        # This would require implementing get_summaries_for_period first
-        # For now, return empty dict
-        return {
+        summaries = await self.repo.get_summaries_for_period(user_id, start_date, end_date)
+        
+        result: Dict[str, List[str]] = {
             "thinking": [],
             "feeling": [],
             "behavior": [],
             "relationships": [],
             "health": []
+        }
+        
+        # Aggregate all entries, keeping unique values
+        for summary in summaries:
+            for category in result.keys():
+                values = getattr(summary, category, None) or []
+                for value in values:
+                    if value and value not in result[category]:
+                        result[category].append(value)
+        
+        return result
+    
+    async def get_trends(
+        self,
+        user_id: int,
+        days: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Analyze trends over the specified number of days.
+        
+        Args:
+            user_id: User ID
+            days: Number of days to analyze
+            
+        Returns:
+            Dict with trend analysis including:
+            - most_common: Most frequently mentioned items per category
+            - daily_counts: Number of entries per day
+            - categories_filled: Which categories have data
+        """
+        end = date.today()
+        start = end - timedelta(days=days)
+        summaries = await self.repo.get_summaries_for_period(user_id, start, end)
+        
+        # Count occurrences of each item
+        from collections import Counter
+        category_counters: Dict[str, Counter] = {
+            "thinking": Counter(),
+            "feeling": Counter(),
+            "behavior": Counter(),
+            "relationships": Counter(),
+            "health": Counter()
+        }
+        
+        daily_counts = []
+        for summary in summaries:
+            day_count = 0
+            for category in category_counters.keys():
+                values = getattr(summary, category, None) or []
+                for value in values:
+                    if value:
+                        category_counters[category][value] += 1
+                        day_count += 1
+            daily_counts.append({
+                "date": summary.date.isoformat(),
+                "count": day_count
+            })
+        
+        # Get most common items per category
+        most_common = {}
+        for category, counter in category_counters.items():
+            most_common[category] = counter.most_common(5)
+        
+        # Which categories have data
+        categories_filled = {
+            category: len(counter) > 0
+            for category, counter in category_counters.items()
+        }
+        
+        return {
+            "period_days": days,
+            "summaries_count": len(summaries),
+            "most_common": most_common,
+            "daily_counts": daily_counts,
+            "categories_filled": categories_filled
         }
 

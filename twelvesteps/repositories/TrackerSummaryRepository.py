@@ -1,8 +1,8 @@
 """Repository for TrackerSummary operations"""
 from datetime import date
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, and_
 from db.models import TrackerSummary
 
 
@@ -29,6 +29,61 @@ class TrackerSummaryRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+    
+    async def get_summaries_for_period(
+        self,
+        user_id: int,
+        start_date: date,
+        end_date: date
+    ) -> List[TrackerSummary]:
+        """
+        Get all TrackerSummary records for a user within a date range.
+        
+        Args:
+            user_id: User ID
+            start_date: Start date (inclusive)
+            end_date: End date (inclusive)
+            
+        Returns:
+            List of TrackerSummary records ordered by date ascending
+        """
+        stmt = (
+            select(TrackerSummary)
+            .where(
+                and_(
+                    TrackerSummary.user_id == user_id,
+                    TrackerSummary.date >= start_date,
+                    TrackerSummary.date <= end_date
+                )
+            )
+            .order_by(TrackerSummary.date)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_last_n_summaries(
+        self,
+        user_id: int,
+        limit: int = 7
+    ) -> List[TrackerSummary]:
+        """
+        Get last N TrackerSummary records for a user.
+        
+        Args:
+            user_id: User ID
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of TrackerSummary records ordered by date descending
+        """
+        stmt = (
+            select(TrackerSummary)
+            .where(TrackerSummary.user_id == user_id)
+            .order_by(desc(TrackerSummary.date))
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
     
     async def create_or_update(
         self,

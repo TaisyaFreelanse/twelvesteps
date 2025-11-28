@@ -951,8 +951,16 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 async def handle_day(message: Message, state: FSMContext) -> None:
     """
     Handles /day command: Returns analysis and reflection message.
+    IMPORTANT: Clears step answering state to prevent /day from being treated as step answer.
     """
     telegram_id = message.from_user.id
+    
+    # CRITICAL: Clear step answering state if active
+    # This prevents /day from being processed as a step answer
+    current_state = await state.get_state()
+    if current_state == StepState.answering or current_state == StepState.filling_template:
+        await state.clear()
+        logger.info(f"Cleared step state for user {telegram_id} when switching to /day")
     
     try:
         backend_reply = await BACKEND_CLIENT.day(telegram_id=telegram_id, debug=False)

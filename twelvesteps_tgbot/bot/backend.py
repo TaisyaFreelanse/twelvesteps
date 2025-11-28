@@ -461,9 +461,11 @@ class ChatResponse(BaseModel):
 async def call_legacy_chat(telegram_id: int, text: str, debug: bool) -> Union[str, ChatResponse]:
     """
     Calls the dedicated chat endpoint (separate from main API if configured).
+    Chat processing involves multiple LLM calls and can take 30-60 seconds.
     """
     payload = {"telegram_id": str(telegram_id), "message": text, "debug": debug}
-    timeout = aiohttp.ClientTimeout(total=20)
+    # Increased timeout for chat: classification + embedding + semantic search + response generation
+    timeout = aiohttp.ClientTimeout(total=120)
 
     # Note: Using a fresh session here in case BACKEND_CHAT_URL is different base
     async with aiohttp.ClientSession(timeout=timeout) as session:

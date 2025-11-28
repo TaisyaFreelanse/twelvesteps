@@ -115,7 +115,7 @@ class VectorStoreService:
         """Delete frame embedding from vector store."""
         self.frames_collection.delete(ids=[str(frame_id)])
     
-    async def search_frames(
+    def search_frames(
         self, 
         query_embedding: List[float], 
         user_id: int, 
@@ -132,17 +132,22 @@ class VectorStoreService:
         Returns:
             Dict with 'ids', 'distances', 'metadatas', 'documents'
         """
-        results = self.frames_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=limit,
-            where={"user_id": user_id}
-        )
-        return results
+        try:
+            results = self.frames_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                where={"user_id": user_id}
+            )
+            return results
+        except Exception as e:
+            # Return empty results on error
+            return {"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]}
     
-    async def search_core(
+    def search_core(
         self,
         query_embedding: List[float],
-        limit: int = 5
+        limit: int = 5,
+        filter_tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Search GPT-SELF core concepts by semantic similarity.
@@ -150,15 +155,32 @@ class VectorStoreService:
         Args:
             query_embedding: Query embedding vector
             limit: Maximum number of results
+            filter_tags: Optional list of tags to filter by
             
         Returns:
             Dict with 'ids', 'distances', 'metadatas', 'documents'
         """
-        results = self.core_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=limit
-        )
-        return results
+        try:
+            where_filter = None
+            if filter_tags:
+                where_filter = {"tags": {"$in": filter_tags}}
+            
+            results = self.core_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                where=where_filter
+            )
+            return results
+        except Exception as e:
+            return {"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]}
+    
+    def get_core_count(self) -> int:
+        """Get number of chunks in GPT-SELF core collection."""
+        return self.core_collection.count()
+    
+    def get_frames_count(self) -> int:
+        """Get number of frames in frames collection."""
+        return self.frames_collection.count()
     
     def add_core_chunk(
         self,

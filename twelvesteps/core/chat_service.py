@@ -170,8 +170,9 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             limit=5,
         )
         
-        # Semantic search (NEW)
+        # Semantic search for frames and GPT-SELF core
         semantic_frames = []
+        core_context = ""
         try:
             # Create embedding for the message
             embedding_response = await openai_client.embeddings.create(
@@ -180,8 +181,8 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             )
             query_embedding = embedding_response.data[0].embedding
             
-            # Search in vector store
-            semantic_results = await vector_store.search_frames(
+            # Search in frames (synchronous call)
+            semantic_results = vector_store.search_frames(
                 query_embedding=query_embedding,
                 user_id=user_id,
                 limit=5
@@ -191,6 +192,21 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             if semantic_results.get("ids") and len(semantic_results["ids"][0]) > 0:
                 semantic_frame_ids = [int(frame_id) for frame_id in semantic_results["ids"][0]]
                 semantic_frames = await frame_repo.get_frames_by_ids(semantic_frame_ids)
+            
+            # Search GPT-SELF core for relevant strategies (synchronous call)
+            if vector_store.get_core_count() > 0:
+                core_results = vector_store.search_core(
+                    query_embedding=query_embedding,
+                    limit=3
+                )
+                
+                # Build core context from results
+                if core_results.get("documents") and len(core_results["documents"][0]) > 0:
+                    core_chunks = core_results["documents"][0]
+                    core_context = "\n\n[Контекст из ядра GPT-SELF]:\n" + "\n---\n".join(core_chunks)
+                    if debug:
+                        print(f"[handle_chat] Found {len(core_chunks)} relevant core chunks")
+                        
         except Exception as e:
             # Log error but don't fail the request
             if debug:
@@ -221,6 +237,10 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
     # 3. Подготовка промптов (Existing logic)
     system_prompt = await PromptRepository.load_system_prompt()
     helper_prompt = _build_helper_prompt(relevant_frames)
+    
+    # Add GPT-SELF core context if available
+    if 'core_context' in locals() and core_context:
+        helper_prompt = f"{helper_prompt}\n{core_context}" if helper_prompt else core_context
 
     # 4. Загрузка истории (Existing logic)
     async with async_session_factory() as session:
@@ -370,7 +390,7 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
     # 5. Load message history
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
-        last_messages = await msg_repo.get_last_messages(user_id, limit=5)
+        last_messages = await msg_repo.get_last_messages(user_id, amount=5)
 
     # 6. Create Assistant and Context
     assistant = Assistant(thanks_system_prompt, personalized_prompt, helper_prompt)
@@ -407,6 +427,9 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
     """
     Handle /day command - analyze current state, ask questions, provide reflection.
     Different from /thanks - focuses on analysis rather than support.
+    
+    IMPORTANT: Closes any active step Tail and switches session context to DAY
+    to prevent /day from being treated as a step answer.
     """
     telegram_id_value = str(telegram_id)
     
@@ -420,11 +443,32 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
         user_id = user.id
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
         
-        # Check last command to avoid duplication
+        # CRITICAL: Close any active step Tail to prevent /day from being saved as step answer
+        from db.models import Tail, TailType
+        from sqlalchemy import select
+        from datetime import datetime
+        
+        active_tail_stmt = select(Tail).where(
+            Tail.user_id == user_id,
+            Tail.tail_type == TailType.STEP_QUESTION,
+            Tail.is_closed == False
+        )
+        tail_result = await session.execute(active_tail_stmt)
+        active_tail = tail_result.scalars().first()
+        
+        if active_tail:
+            active_tail.is_closed = True
+            active_tail.closed_at = datetime.utcnow()
+            if debug:
+                print(f"[handle_day] Closed active Tail {active_tail.id} for user {user_id}")
+        
+        # Switch session context to DAY
         from repositories.SessionContextRepository import SessionContextRepository
         from db.models import SessionType
         
         session_context_repo = SessionContextRepository(session)
+        
+        # Check last command to avoid duplication
         last_context = await session_context_repo.get_active_context(user_id, SessionType.CHAT)
         
         # Check if last command was /day (avoid duplicate responses)
@@ -438,13 +482,18 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
                     "Давай поговорим о твоем текущем состоянии. Что на душе?"
                 ]
                 import random
+                await session.commit()
                 return ChatResponse(reply=random.choice(variation_prompts), log=None)
         
-        # Save current command in context
+        # Switch to DAY context (this overrides any STEPS context)
         await session_context_repo.create_or_update_context(
             user_id,
-            SessionType.CHAT,
-            {"last_command": "/day", "command_timestamp": datetime.utcnow().isoformat()}
+            SessionType.DAY,
+            {
+                "last_command": "/day",
+                "command_timestamp": datetime.utcnow().isoformat(),
+                "day_context": "Пользователь использует команду /day для анализа текущего состояния"
+            }
         )
         await session.commit()
 
@@ -469,7 +518,7 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
     # 5. Load message history
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
-        last_messages = await msg_repo.get_last_messages(user_id, limit=5)
+        last_messages = await msg_repo.get_last_messages(user_id, amount=5)
 
     # 6. Create Assistant and Context
     assistant = Assistant(day_system_prompt, personalized_prompt, helper_prompt)
