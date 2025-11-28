@@ -20,8 +20,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add title and description columns to steps table
-    op.add_column('steps', sa.Column('title', sa.String(255), nullable=True))
-    op.add_column('steps', sa.Column('description', sa.Text(), nullable=True))
+    from sqlalchemy import inspect
+    
+    # Check if columns already exist before adding them
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_columns = [col['name'] for col in inspector.get_columns('steps')]
+    
+    # Add columns only if they don't exist
+    if 'title' not in existing_columns:
+        op.add_column('steps', sa.Column('title', sa.String(255), nullable=True))
+    if 'description' not in existing_columns:
+        op.add_column('steps', sa.Column('description', sa.Text(), nullable=True))
 
 
 def downgrade() -> None:

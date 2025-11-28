@@ -21,22 +21,30 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create frame_tracking table for frame metadata and confirmation tracking."""
-    op.create_table(
-        'frame_tracking',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('confirmed', sa.JSON(), nullable=True),  # JSON массив подтвержденных фреймов
-        sa.Column('candidates', sa.JSON(), nullable=True),  # JSON массив кандидатов
-        sa.Column('tracking', sa.JSON(), nullable=True),  # JSON: repetition_count объект, min_to_confirm число
-        sa.Column('archetypes', sa.JSON(), nullable=True),  # JSON массив архетипов: victim, rescuer, judge и т.д.
-        sa.Column('meta_flags', sa.JSON(), nullable=True),  # JSON массив: loop_detected, frame_shift, identity_conflict
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index(op.f('ix_frame_tracking_user_id'), 'frame_tracking', ['user_id'], unique=False)
-    op.create_index(op.f('ix_frame_tracking_id'), 'frame_tracking', ['id'], unique=False)
+    from sqlalchemy import inspect
+    
+    # Check if table already exists
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
+    if 'frame_tracking' not in existing_tables:
+        op.create_table(
+            'frame_tracking',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('user_id', sa.Integer(), nullable=False),
+            sa.Column('confirmed', sa.JSON(), nullable=True),  # JSON массив подтвержденных фреймов
+            sa.Column('candidates', sa.JSON(), nullable=True),  # JSON массив кандидатов
+            sa.Column('tracking', sa.JSON(), nullable=True),  # JSON: repetition_count объект, min_to_confirm число
+            sa.Column('archetypes', sa.JSON(), nullable=True),  # JSON массив архетипов: victim, rescuer, judge и т.д.
+            sa.Column('meta_flags', sa.JSON(), nullable=True),  # JSON массив: loop_detected, frame_shift, identity_conflict
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+            sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_frame_tracking_user_id'), 'frame_tracking', ['user_id'], unique=False)
+        op.create_index(op.f('ix_frame_tracking_id'), 'frame_tracking', ['id'], unique=False)
 
 
 def downgrade() -> None:

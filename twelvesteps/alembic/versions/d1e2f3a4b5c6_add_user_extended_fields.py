@@ -21,17 +21,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add extended fields to users table."""
+    from sqlalchemy import inspect
+    
+    # Check if columns already exist before adding them
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_columns = [col['name'] for col in inspector.get_columns('users')]
+    
     # Add relapse_dates (JSON array of dates in YYYY-MM-DD format)
-    op.add_column('users', sa.Column('relapse_dates', sa.JSON(), nullable=True))
+    if 'relapse_dates' not in existing_columns:
+        op.add_column('users', sa.Column('relapse_dates', sa.JSON(), nullable=True))
     
     # Add sponsor_ids (JSON array of sponsor IDs)
-    op.add_column('users', sa.Column('sponsor_ids', sa.JSON(), nullable=True))
+    if 'sponsor_ids' not in existing_columns:
+        op.add_column('users', sa.Column('sponsor_ids', sa.JSON(), nullable=True))
     
     # Add custom_fields (JSON for goals, important people, support format)
-    op.add_column('users', sa.Column('custom_fields', sa.JSON(), nullable=True))
+    if 'custom_fields' not in existing_columns:
+        op.add_column('users', sa.Column('custom_fields', sa.JSON(), nullable=True))
     
     # Add last_active (timestamp, updated on each interaction)
-    op.add_column('users', sa.Column('last_active', sa.DateTime(timezone=True), nullable=True))
+    if 'last_active' not in existing_columns:
+        op.add_column('users', sa.Column('last_active', sa.DateTime(timezone=True), nullable=True))
 
 
 def downgrade() -> None:

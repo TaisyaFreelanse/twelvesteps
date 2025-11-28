@@ -177,9 +177,12 @@ class ProfileRepository:
         questions_result = await self.db.execute(questions_query)
         questions_count = questions_result.scalar() or 0
 
-        # Count answers (latest versions only)
-        answers_query = select(func.count(ProfileAnswer.id.distinct())).join(
-            ProfileQuestion
+        # Count answers (count distinct questions that have answers)
+        # Count how many unique questions have been answered for this section
+        from sqlalchemy import distinct
+        
+        answers_query = select(func.count(distinct(ProfileAnswer.question_id))).join(
+            ProfileQuestion, ProfileAnswer.question_id == ProfileQuestion.id
         ).where(
             ProfileAnswer.user_id == user_id,
             ProfileQuestion.section_id == section_id

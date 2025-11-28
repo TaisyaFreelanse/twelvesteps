@@ -21,6 +21,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create tracker_summaries table for daily observation tracking."""
+    from sqlalchemy import inspect
+    
+    # Check if table already exists
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
+    if 'tracker_summaries' in existing_tables:
+        return  # Table already exists, skip migration
     op.create_table(
         'tracker_summaries',
         sa.Column('id', sa.Integer(), nullable=False),

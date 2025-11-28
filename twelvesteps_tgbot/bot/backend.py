@@ -141,6 +141,18 @@ class BackendClient:
     async def switch_to_question(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Switch to a specific question"""
         return await self._request("POST", "/steps/switch-question", token=access_token, json={"question_id": question_id})
+    
+    async def get_steps_list(self, access_token: str) -> Dict[str, Any]:
+        """Get list of all steps"""
+        return await self._request("GET", "/steps/list", token=access_token)
+    
+    async def switch_step(self, access_token: str, step_id: int) -> Dict[str, Any]:
+        """Switch to a specific step"""
+        return await self._request("POST", "/steps/switch", token=access_token, json={"step_id": step_id})
+    
+    async def get_question_detail(self, access_token: str, question_id: int) -> Dict[str, Any]:
+        """Get question details"""
+        return await self._request("GET", f"/steps/question/{question_id}", token=access_token)
 
     # --- Steps Settings Functionality ---
 
@@ -195,6 +207,15 @@ class BackendClient:
         payload = {"text": text}
         return await self._request(
             "POST", f"/profile/sections/{section_id}/free-text", token=access_token, json=payload
+        )
+    
+    async def submit_general_free_text(
+        self, access_token: str, text: str
+    ) -> Dict[str, Any]:
+        """Submit general free text (without section_id) - will be distributed across sections"""
+        payload = {"text": text, "section_id": None}
+        return await self._request(
+            "POST", "/profile/free-text", token=access_token, json=payload
         )
 
     async def create_custom_section(

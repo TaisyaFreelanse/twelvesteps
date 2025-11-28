@@ -21,9 +21,22 @@ class Part(BaseModel):
     blocks: List[str]
     emotion: str
     importance: int
+    thinking_frame: Optional[str] = None
+    level_of_mind: Optional[int] = None
+    memory_type: Optional[str] = None
+    target_block: Optional[dict] = None
+    action: Optional[str] = None
+    strategy_hint: Optional[str] = None
+
+class ClassificationMetadata(BaseModel):
+    intention: Optional[str] = None
+    urgency: Optional[str] = None
+    cognitive_mode: Optional[str] = None
+    suggested_response_mode: Optional[str] = None
 
 class ClassificationResult(BaseModel):
     parts: List[Part]
+    metadata: Optional[ClassificationMetadata] = None
 
 class OpenAI(Provider):
     async def load_config(self, path: str):

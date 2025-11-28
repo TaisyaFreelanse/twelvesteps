@@ -39,10 +39,12 @@ EXPERIENCE_MAPPING = {
     "НОВИЧОК": "NEWBIE",
     "NEWBIE": "NEWBIE",
     
-    "УЖЕ В ПРОГРАММЕ": "SOME_EXPERIENCE",
+    "ЕСТЬ НЕМНОГО ОПЫТА": "SOME_EXPERIENCE",
     "ЕСТЬ ОПЫТ": "SOME_EXPERIENCE",
+    "УЖЕ В ПРОГРАММЕ": "SOME_EXPERIENCE",
     "SOME_EXPERIENCE": "SOME_EXPERIENCE",
     
+    "БЫВАЛЫЙ": "LONG_TERM",
     "ПРОХОДИЛ ШАГИ": "LONG_TERM",
     "СПОНСОР": "LONG_TERM",
     "ДАВНО В ПРОГРАММЕ": "LONG_TERM",

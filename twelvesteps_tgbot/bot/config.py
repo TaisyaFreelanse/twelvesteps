@@ -32,7 +32,8 @@ def build_main_menu_markup() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="/steps"), KeyboardButton(text="/day")],
-            [KeyboardButton(text="/sos"), KeyboardButton(text="/thanks")],
+            [KeyboardButton(text="/profile"), KeyboardButton(text="/sos")],
+            [KeyboardButton(text="/thanks")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -84,12 +85,17 @@ def build_profile_sections_markup(sections: List[Dict[str, Any]]) -> InlineKeybo
     """
     Build inline keyboard with all profile sections in a grid layout.
     Sections are displayed horizontally (2-3 per row).
+    Excludes "Свободный рассказ" (id=14) from the list as it has a separate button at the bottom.
     """
     buttons = []
     row = []
     
     for section in sections:
         section_id = section.get("id")
+        # Skip "Свободный рассказ" section (id=14) - it has a separate button at the bottom
+        if section_id == 14:
+            continue
+            
         name = section.get("name", "")
         # Limit button text length for Telegram (max 64 chars)
         button_text = name[:60] + "..." if len(name) > 60 else name
@@ -246,6 +252,7 @@ def format_step_progress_indicator(
 def build_step_actions_markup() -> InlineKeyboardMarkup:
     """Markup for additional step actions during answering."""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🆘 Нужна помощь", callback_data="sos_help")],
         [InlineKeyboardButton(text="🧩 Заполнить по шаблону", callback_data="step_template")],
         [
             InlineKeyboardButton(text="⏸ Пауза", callback_data="step_pause"),

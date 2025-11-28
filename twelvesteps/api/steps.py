@@ -87,7 +87,12 @@ class StepFlowService:
         result = await self.session.execute(stmt)
         questions = result.scalars().all()
         
-        return [{"id": q.id, "text": q.text} for q in questions]
+        # Ensure id and text are not None
+        return [
+            {"id": int(q.id), "text": str(q.text) if q.text else ""} 
+            for q in questions 
+            if q.id is not None
+        ]
     
     async def save_draft(self, user_id: int, draft_text: str) -> bool:
         """Save draft answer in Tail.payload without closing Tail"""
@@ -305,7 +310,12 @@ class StepFlowService:
         active_tail.is_closed = True
         active_tail.closed_at = datetime.now()
 
-        await self.session.commit()
+        # 6. IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
+        # This builds a complete picture of the user's character
+        # Note: update_personalized_prompt_from_all_answers commits internally
+        from services.personalization_service import update_personalized_prompt_from_all_answers
+        await update_personalized_prompt_from_all_answers(self.session, user_id)
+        
         return True
     
     async def get_current_step_questions(self, user_id: int) -> list[dict]:

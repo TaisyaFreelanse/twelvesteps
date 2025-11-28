@@ -115,7 +115,7 @@ class SosService:
         )
         
         # Call provider
-        response: Response = await provider.generate(context)
+        response: Response = await provider.respond(context)
         reply_text = response.message
         
         # Add assistant response to history

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import Frame as FrameModel, Block as BlockModel
@@ -16,8 +16,25 @@ class FrameRepository:
         weight: int,
         user_id: int,
         block_titles: List[str],
+        thinking_frame: Optional[str] = None,
+        level_of_mind: Optional[int] = None,
+        memory_type: Optional[str] = None,
+        target_block: Optional[dict] = None,
+        action: Optional[str] = None,
+        strategy_hint: Optional[str] = None,
     ) -> FrameModel:
-        frame = FrameModel(content=content, emotion=emotion, weight=weight, user_id=user_id)
+        frame = FrameModel(
+            content=content,
+            emotion=emotion,
+            weight=weight,
+            user_id=user_id,
+            thinking_frame=thinking_frame,
+            level_of_mind=level_of_mind,
+            memory_type=memory_type,
+            target_block=target_block,
+            action=action,
+            strategy_hint=strategy_hint
+        )
         block_repo = BlockRepository(self.db)
 
         blocks: List[BlockModel] = []
@@ -52,3 +69,15 @@ class FrameRepository:
         )
         result = await self.db.execute(query)
         return list(result.scalars().unique().all())
+    
+    async def get_frames_by_ids(
+        self,
+        frame_ids: List[int],
+    ) -> List[FrameModel]:
+        """Get frames by their IDs."""
+        if not frame_ids:
+            return []
+        
+        query = select(FrameModel).where(FrameModel.id.in_(frame_ids))
+        result = await self.db.execute(query)
+        return list(result.scalars().all())

@@ -92,7 +92,7 @@ def register_handlers(dp: Dispatcher) -> None:
 
     # 3. Step Answering Flow (Only works if state is StepState.answering)
     dp.message(StateFilter(StepState.answering))(handle_step_answer)
-    dp.message(StateFilter(StepState.template_field))(handle_template_field_input)
+    dp.message(StateFilter(StepState.filling_template))(handle_template_field_input)
     dp.callback_query(F.data.startswith("step_"))(handle_step_action_callback)
     dp.message(Command(commands=["qa_open"]))(qa_open)
     
@@ -722,8 +722,10 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await edit_long_message(
                 callback,
                 "❌ Помощь отменена.\n\nВернулся в главное меню.",
-                reply_markup=build_main_menu_markup()
+                reply_markup=None
             )
+            # Send main menu as a new message with ReplyKeyboardMarkup
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             await callback.answer()
             return
         
@@ -733,7 +735,25 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await edit_long_message(
                 callback,
                 "✅ Вышел из помощи.\n\nВернулся в главное меню.",
-                reply_markup=build_main_menu_markup()
+                reply_markup=None
+            )
+            # Send main menu as a new message with ReplyKeyboardMarkup
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+            await callback.answer()
+            return
+        
+        if data == "sos_help":
+            # User clicked "🆘 Нужна помощь" button - show help type selection
+            current_state = await state.get_state()
+            if current_state == StepState.answering:
+                await state.update_data(previous_state=StepState.answering)
+            
+            await state.set_state(SosStates.help_type_selection)
+            await edit_long_message(
+                callback,
+                "🆘 Хорошо, я с тобой. Давай разберёмся, с чем нужна помощь.\n\n"
+                "Выбери или опиши словами:",
+                reply_markup=build_sos_help_type_markup()
             )
             await callback.answer()
             return
@@ -785,8 +805,10 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await edit_long_message(
                 callback,
                 "✅ Черновик сохранён.\n\nВернулся в главное меню.",
-                reply_markup=build_main_menu_markup()
+                reply_markup=None
             )
+            # Send main menu as a new message with ReplyKeyboardMarkup
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             await callback.answer("Черновик сохранён")
             return
         
@@ -796,8 +818,10 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await edit_long_message(
                 callback,
                 "✅ Помощь завершена.\n\nВернулся в главное меню.",
-                reply_markup=build_main_menu_markup()
+                reply_markup=None
             )
+            # Send main menu as a new message with ReplyKeyboardMarkup
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             await callback.answer()
             return
         
@@ -1213,12 +1237,27 @@ async def handle_profile_free_text(message: Message, state: FSMContext) -> None:
                 reply_markup=build_main_menu_markup()
             )
         else:
-            # General free text - would need special handling to distribute across sections
-            # For now, show message
-            await message.answer(
-                "✅ Текст сохранён. Система обработает его и распределит по разделам.",
-                reply_markup=build_main_menu_markup()
-            )
+            # General free text - process and distribute across sections
+            try:
+                result = await BACKEND_CLIENT.submit_general_free_text(token, text)
+                saved_sections = result.get("saved_sections", [])
+                if saved_sections:
+                    sections_list = ", ".join([s.get("section_name", "") for s in saved_sections])
+                    await message.answer(
+                        f"✅ Текст обработан и распределён по разделам: {sections_list}",
+                        reply_markup=build_main_menu_markup()
+                    )
+                else:
+                    await message.answer(
+                        "✅ Текст сохранён. Система обработает его и распределит по разделам.",
+                        reply_markup=build_main_menu_markup()
+                    )
+            except Exception as e:
+                logger.exception("Error processing general free text: %s", e)
+                await message.answer(
+                    "✅ Текст сохранён. Система обработает его и распределит по разделам.",
+                    reply_markup=build_main_menu_markup()
+                )
         
         await state.clear()
         
@@ -1286,19 +1325,75 @@ async def handle_template_selection(callback: CallbackQuery, state: FSMContext) 
             templates_data = await BACKEND_CLIENT.get_templates(token)
             templates = templates_data.get("templates", [])
             
+            # Debug logging
+            logger.info(f"Templates received: {len(templates)} templates")
+            for t in templates:
+                logger.info(f"Template: id={t.get('id')}, name={t.get('name')}, type={t.get('template_type')}")
+            
             author_template = None
             for template in templates:
-                if template.get("template_type") == "AUTHOR":
+                template_type = template.get("template_type")
+                # Handle both string and enum-like values
+                if template_type == "AUTHOR" or (hasattr(template_type, 'value') and template_type.value == "AUTHOR"):
                     author_template = template
                     break
             
             if author_template:
                 await BACKEND_CLIENT.set_active_template(token, author_template.get("id"))
-                await edit_long_message(
-                    callback,
-                    "✅ Выбран авторский шаблон!\n\nТеперь можешь начать работу по шагу. Нажми /steps снова."
-                )
-                await callback.answer("Авторский шаблон выбран")
+                await callback.answer("✅ Авторский шаблон выбран")
+                
+                # Automatically start steps flow after template selection
+                # Get current step info
+                step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                
+                if step_info:
+                    step_number = step_info.get("step_number")
+                    step_title = step_info.get("step_title") or step_info.get("step_description") or (f"Шаг {step_number}" if step_number else "Шаг")
+                    total_steps = step_info.get("total_steps", 12)
+                    
+                    # Build progress indicator (handle None values)
+                    if step_number is not None and total_steps is not None:
+                        progress_bar = "█" * step_number + "░" * (total_steps - step_number)
+                        progress_text = f"Шаг {step_number}/{total_steps}\n{progress_bar}"
+                    else:
+                        progress_text = "Начинаем работу по шагам..."
+                    
+                    # Get current question
+                    step_next = await BACKEND_CLIENT.get_next_step(token)
+                    
+                    if step_next:
+                        is_completed = step_next.get("is_completed", False)
+                        question_text = step_next.get("message", "")
+                        
+                        if is_completed or not question_text or question_text == "Program completed.":
+                            # No questions available - need to check if steps exist
+                            await edit_long_message(
+                                callback,
+                                f"✅ Шаблон выбран!\n\n{progress_text}\n\n"
+                                "⚠️ В базе данных пока нет шагов или вопросов.\n\n"
+                                "Обратитесь к администратору для настройки шагов программы.",
+                                reply_markup=None
+                            )
+                        else:
+                            # Show question
+                            await edit_long_message(
+                                callback,
+                                f"✅ Шаблон выбран!\n\n{progress_text}\n\n📘 {step_title}\n\n{question_text}",
+                                reply_markup=build_step_actions_markup()
+                            )
+                            await state.set_state(StepState.answering)
+                    else:
+                        await edit_long_message(
+                            callback,
+                            f"✅ Шаблон выбран!\n\n{progress_text}\n\n📘 {step_title}\n\nНачинаем работу по шагу...",
+                            reply_markup=build_step_actions_markup()
+                        )
+                        await state.set_state(StepState.answering)
+                else:
+                    await edit_long_message(
+                        callback,
+                        "✅ Выбран авторский шаблон!\n\nТеперь можешь начать работу по шагу. Нажми /steps."
+                    )
             else:
                 await callback.answer("Авторский шаблон не найден")
                 
@@ -1593,7 +1688,37 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             
             # Get template structure
             structure = active_template.get("structure", {})
-            fields = structure.get("fields", [])
+            
+            # Convert structure dict to fields list if needed
+            # Structure can be either:
+            # 1. Dict with "fields" key: {"fields": [{"name": "...", "description": "..."}]}
+            # 2. Dict with field keys: {"situation": "Ситуация", "thoughts": "Мысли", ...}
+            # 3. Dict with detailed structure: {"situation": {"label": "...", "description": "...", "order": 1}, ...}
+            if "fields" in structure:
+                fields = structure.get("fields", [])
+            else:
+                # Convert dict structure to fields list
+                fields = []
+                # Check if structure has detailed format (with label/description) or simple format
+                sample_value = next(iter(structure.values())) if structure else None
+                if isinstance(sample_value, dict) and "label" in sample_value:
+                    # Detailed format: {"situation": {"label": "...", "description": "...", "order": 1}}
+                    sorted_items = sorted(structure.items(), key=lambda x: x[1].get("order", 999))
+                    for field_key, field_data in sorted_items:
+                        fields.append({
+                            "key": field_key,
+                            "name": field_data.get("label", field_key),
+                            "description": field_data.get("description", ""),
+                            "min_items": field_data.get("min_items")
+                        })
+                else:
+                    # Simple format: {"situation": "Ситуация", "thoughts": "Мысли", ...}
+                    for field_key, field_label in structure.items():
+                        fields.append({
+                            "key": field_key,
+                            "name": field_label if isinstance(field_label, str) else field_label.get("label", field_key),
+                            "description": field_label.get("description", "") if isinstance(field_label, dict) else ""
+                        })
             
             if not fields:
                 await callback.answer("В шаблоне нет полей")
@@ -1603,23 +1728,139 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             await state.update_data(
                 template_id=active_template_id,
                 template_fields=fields,
-                current_field_index=0
+                current_field_index=0,
+                template_values={}
             )
             
             # Show first field
             first_field = fields[0]
-            field_name = first_field.get("name", "Поле")
+            # Support both formats: {"name": "..."} or {"key": "...", "name": "..."}
+            field_key = first_field.get("key") or first_field.get("name", "field_0")
+            field_name = first_field.get("name", field_key)
             field_description = first_field.get("description", "")
             
             field_text = f"📋 Заполнение по шаблону\n\n"
-            field_text += f"Поле: {field_name}\n"
+            field_text += f"**{field_name}**\n"
             if field_description:
-                field_text += f"{field_description}\n\n"
-            field_text += "Введи значение:"
+                field_text += f"{field_description}\n"
+            min_items = first_field.get("min_items")
+            if min_items:
+                field_text += f"\n⚠️ Важно: нужно указать минимум {min_items} элемента(ов).\n"
+            field_text += "\nВведи значение:"
             
             await edit_long_message(callback, field_text)
-            await state.set_state(StepState.template_field)
+            await state.set_state(StepState.filling_template)
             await callback.answer()
+            
+        elif data == "step_switch_question":
+            # Show list of questions to switch to
+            try:
+                step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                step_id = step_info.get("step_id") if step_info else None
+                
+                if step_id:
+                    try:
+                        questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
+                        questions = questions_data.get("questions", []) if questions_data else []
+                        
+                        if questions:
+                            await edit_long_message(
+                                callback,
+                                "📋 Выбери вопрос для перехода:",
+                                reply_markup=build_step_questions_markup(questions, step_id)
+                            )
+                            await callback.answer()
+                        else:
+                            await callback.answer("Вопросы не найдены")
+                    except Exception as e:
+                        logger.error(f"Error getting questions: {e}")
+                        await callback.answer("Ошибка получения списка вопросов")
+                else:
+                    await callback.answer("Шаг не выбран")
+            except Exception as e:
+                logger.error(f"Error in step_switch_question: {e}")
+                await callback.answer("Ошибка. Попробуй позже.")
+            
+        elif data == "step_previous":
+            # Get previous question (if exists)
+            try:
+                step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                step_id = step_info.get("step_id") if step_info else None
+                
+                if step_id:
+                    try:
+                        questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
+                        questions = questions_data.get("questions", []) if questions_data else []
+                        
+                        if questions and len(questions) > 1:
+                            # Find current question index
+                            current_question_text = await get_current_step_question(
+                                telegram_id=telegram_id,
+                                username=username,
+                                first_name=first_name
+                            )
+                            current_text = current_question_text.get("message", "") if current_question_text else ""
+                            
+                            # Find previous question
+                            current_idx = -1
+                            for i, q in enumerate(questions):
+                                if q.get("text") == current_text:
+                                    current_idx = i
+                                    break
+                            
+                            if current_idx > 0:
+                                prev_question = questions[current_idx - 1]
+                                # Switch to previous question
+                                await BACKEND_CLIENT.switch_to_question(token, prev_question.get("id"))
+                                await edit_long_message(
+                                    callback,
+                                    f"📜 Предыдущий вопрос:\n\n{prev_question.get('text', '')}",
+                                    reply_markup=build_step_actions_markup()
+                                )
+                                await state.set_state(StepState.answering)
+                                await callback.answer()
+                            else:
+                                await callback.answer("Это первый вопрос в шаге")
+                        else:
+                            await callback.answer("Нет предыдущего вопроса")
+                    except Exception as e:
+                        logger.error(f"Error getting previous question: {e}")
+                        await callback.answer("Ошибка получения вопросов")
+                else:
+                    await callback.answer("Шаг не выбран")
+            except Exception as e:
+                logger.error(f"Error in step_previous: {e}")
+                await callback.answer("Ошибка. Попробуй позже.")
+            
+        elif data == "step_add_more":
+            # Allow user to add more to current answer (reopen current question)
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            step_id = step_info.get("step_id")
+            
+            if step_id:
+                # Get current question again
+                step_data = await get_current_step_question(
+                    telegram_id=telegram_id,
+                    username=username,
+                    first_name=first_name
+                )
+                
+                if step_data:
+                    response_text = step_data.get("message", "")
+                    if response_text:
+                        await edit_long_message(
+                            callback,
+                            f"➕ Добавь ещё к ответу:\n\n{response_text}",
+                            reply_markup=build_step_actions_markup()
+                        )
+                        await state.set_state(StepState.answering)
+                        await callback.answer("Можешь дополнить ответ")
+                    else:
+                        await callback.answer("Нет текущего вопроса")
+                else:
+                    await callback.answer("Ошибка получения вопроса")
+            else:
+                await callback.answer("Шаг не выбран")
             
     except Exception as exc:
         logger.exception("Error handling step action callback for %s: %s", telegram_id, exc)
@@ -1702,11 +1943,14 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
         if data == "steps_back":
             # Return to main menu
             await state.clear()
+            # Edit message without ReplyKeyboardMarkup (edit_text doesn't support it)
             await edit_long_message(
                 callback,
                 "✅ Вернулся в главное меню.",
-                reply_markup=build_main_menu_markup()
+                reply_markup=None
             )
+            # Send new message with ReplyKeyboardMarkup
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             await callback.answer()
             return
         
@@ -1845,8 +2089,10 @@ async def handle_template_field_input(message: Message, state: FSMContext) -> No
         
         # Save current field value
         current_field = template_fields[current_field_index]
-        field_name = current_field.get("name", f"field_{current_field_index}")
-        template_values[field_name] = field_value
+        # Support both formats: {"name": "..."} or {"key": "...", "name": "..."}
+        field_key = current_field.get("key") or current_field.get("name", f"field_{current_field_index}")
+        field_name = current_field.get("name", field_key)
+        template_values[field_key] = field_value
         
         # Check if there are more fields
         next_field_index = current_field_index + 1
@@ -1854,14 +2100,19 @@ async def handle_template_field_input(message: Message, state: FSMContext) -> No
         if next_field_index < len(template_fields):
             # Show next field
             next_field = template_fields[next_field_index]
-            next_field_name = next_field.get("name", "Поле")
+            # Support both formats
+            next_field_key = next_field.get("key") or next_field.get("name", "field")
+            next_field_name = next_field.get("name", next_field_key)
             next_field_description = next_field.get("description", "")
+            next_min_items = next_field.get("min_items")
             
             field_text = f"✅ Сохранено: {field_name}\n\n"
-            field_text += f"Следующее поле: {next_field_name}\n"
+            field_text += f"**{next_field_name}**\n"
             if next_field_description:
-                field_text += f"{next_field_description}\n\n"
-            field_text += "Введи значение:"
+                field_text += f"{next_field_description}\n"
+            if next_min_items:
+                field_text += f"\n⚠️ Важно: нужно указать минимум {next_min_items} элемента(ов).\n"
+            field_text += "\nВведи значение:"
             
             await send_long_message(message, field_text)
             await state.update_data(

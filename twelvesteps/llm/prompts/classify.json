@@ -5,7 +5,7 @@
         "prioritization": "Your highest priority is to identify and block direct statements about substance use, addictive behaviors, and the recovery process."
     },
 
-    "task": "Analyze the user's message by splitting it into distinct, meaningful parts. A part is usually a clause or sentence describing a specific action, consequence, or emotional state. For each part, identify the primary emotion and its importance (0-100). Assign one or more thematic 'blocks' ONLY if the part contains significant information for long-term memory. When a part describes both an act of relapse (the action) and its direct negative result (the consequence), apply blocks for BOTH 'Процесс выздоровления' and 'Последствия зависимостей'. Any analyzed part that does not qualify for at least one block must be completely omitted from the final output.",
+    "task": "Analyze the user's message by splitting it into distinct, meaningful parts. A part is usually a clause or sentence describing a specific action, consequence, or emotional state. For each part, identify the primary emotion and its importance (0-100). Assign one or more thematic 'blocks' ONLY if the part contains significant information for long-term memory. When a part describes both an act of relapse (the action) and its direct negative result (the consequence), apply blocks for BOTH 'Процесс выздоровления' and 'Последствия зависимостей'. Any analyzed part that does not qualify for at least one block must be completely omitted from the final output. Additionally, for each part, identify: thinking_frame (cognitive pattern like 'импульс + петля', 'самоосуждение'), level_of_mind (0-100, awareness level), memory_type ('volatile', 'dynamic', or 'stable'), target_block (main and sub block categories), action (recommended action like 'trigger_strategy'), and strategy_hint (specific guidance). Also provide metadata about the overall message: intention, urgency, cognitive_mode, and suggested_response_mode.",
 
     "message_to_analyze": "placeholder for the user's message",
 
@@ -81,9 +81,24 @@
                 "part": "string",
                 "blocks": ["string"],
                 "emotion": "string",
-                "importance": "integer"
+                "importance": "integer",
+                "thinking_frame": "string (optional, e.g. 'импульс + петля', 'самоосуждение')",
+                "level_of_mind": "integer (optional, 0-100, awareness level)",
+                "memory_type": "string (optional: 'volatile', 'dynamic', 'stable')",
+                "target_block": {
+                    "main": "string (optional, main category)",
+                    "sub": "string (optional, subcategory)"
+                },
+                "action": "string (optional, e.g. 'trigger_strategy', 'activate_emergency')",
+                "strategy_hint": "string (optional, specific guidance)"
             }
-        ]
+        ],
+        "metadata": {
+            "intention": "string (optional, e.g. 'кризис/провал', 'поддержка', 'исследование')",
+            "urgency": "string (optional: 'низкая', 'средняя', 'высокая')",
+            "cognitive_mode": "string (optional, e.g. 'импульсивно-рефлексивный', 'аналитический')",
+            "suggested_response_mode": "string (optional, e.g. 'двухуровнево: 1) эмоционально, 2) структурно')"
+        }
     },
 
     "examples": [

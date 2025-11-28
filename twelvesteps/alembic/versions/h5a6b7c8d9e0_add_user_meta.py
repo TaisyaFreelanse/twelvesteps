@@ -21,23 +21,31 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create user_meta table for user system metadata (one-to-one with users)."""
-    op.create_table(
-        'user_meta',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('metasloy_signals', sa.JSON(), nullable=True),  # JSON массив строк
-        sa.Column('prompt_revision_history', sa.Integer(), nullable=True, server_default=sa.text('0')),
-        sa.Column('time_zone', sa.String(length=50), nullable=True),  # string, например "UTC+3"
-        sa.Column('language', sa.String(length=10), nullable=True, server_default='ru'),  # string, default='ru'
-        sa.Column('data_flags', sa.JSON(), nullable=True),  # JSON: encrypted boolean, anonymized boolean, retention_days integer
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('user_id', name='uq_user_meta_user_id')  # One-to-one relationship
-    )
-    op.create_index(op.f('ix_user_meta_user_id'), 'user_meta', ['user_id'], unique=True)
-    op.create_index(op.f('ix_user_meta_id'), 'user_meta', ['id'], unique=False)
+    from sqlalchemy import inspect
+    
+    # Check if table already exists
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
+    if 'user_meta' not in existing_tables:
+        op.create_table(
+            'user_meta',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('user_id', sa.Integer(), nullable=False),
+            sa.Column('metasloy_signals', sa.JSON(), nullable=True),  # JSON массив строк
+            sa.Column('prompt_revision_history', sa.Integer(), nullable=True, server_default=sa.text('0')),
+            sa.Column('time_zone', sa.String(length=50), nullable=True),  # string, например "UTC+3"
+            sa.Column('language', sa.String(length=10), nullable=True, server_default='ru'),  # string, default='ru'
+            sa.Column('data_flags', sa.JSON(), nullable=True),  # JSON: encrypted boolean, anonymized boolean, retention_days integer
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+            sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id'),
+            sa.UniqueConstraint('user_id', name='uq_user_meta_user_id')  # One-to-one relationship
+        )
+        op.create_index(op.f('ix_user_meta_user_id'), 'user_meta', ['user_id'], unique=True)
+        op.create_index(op.f('ix_user_meta_id'), 'user_meta', ['id'], unique=False)
 
 
 def downgrade() -> None:

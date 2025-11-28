@@ -22,9 +22,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    from sqlalchemy import inspect
+    
+    # Check if tables already exist
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
     # Create profile_sections table
-    op.create_table(
-        'profile_sections',
+    if 'profile_sections' not in existing_tables:
+        op.create_table(
+            'profile_sections',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=255), nullable=False),
         sa.Column('icon', sa.String(length=10), nullable=True),
@@ -36,12 +44,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_profile_sections_user_id'), 'profile_sections', ['user_id'], unique=False)
-    op.create_index(op.f('ix_profile_sections_order_index'), 'profile_sections', ['order_index'], unique=False)
+        op.create_index(op.f('ix_profile_sections_user_id'), 'profile_sections', ['user_id'], unique=False)
+        op.create_index(op.f('ix_profile_sections_order_index'), 'profile_sections', ['order_index'], unique=False)
 
     # Create profile_section_data table
-    op.create_table(
-        'profile_section_data',
+    if 'profile_section_data' not in existing_tables:
+        op.create_table(
+            'profile_section_data',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('section_id', sa.Integer(), nullable=False),
@@ -52,12 +61,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['section_id'], ['profile_sections.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_profile_section_data_user_id'), 'profile_section_data', ['user_id'], unique=False)
-    op.create_index(op.f('ix_profile_section_data_section_id'), 'profile_section_data', ['section_id'], unique=False)
+        op.create_index(op.f('ix_profile_section_data_user_id'), 'profile_section_data', ['user_id'], unique=False)
+        op.create_index(op.f('ix_profile_section_data_section_id'), 'profile_section_data', ['section_id'], unique=False)
 
     # Create profile_questions table
-    op.create_table(
-        'profile_questions',
+    if 'profile_questions' not in existing_tables:
+        op.create_table(
+            'profile_questions',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('section_id', sa.Integer(), nullable=False),
         sa.Column('question_text', sa.Text(), nullable=False),
@@ -67,12 +77,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['section_id'], ['profile_sections.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_profile_questions_section_id'), 'profile_questions', ['section_id'], unique=False)
-    op.create_index(op.f('ix_profile_questions_order_index'), 'profile_questions', ['order_index'], unique=False)
+        op.create_index(op.f('ix_profile_questions_section_id'), 'profile_questions', ['section_id'], unique=False)
+        op.create_index(op.f('ix_profile_questions_order_index'), 'profile_questions', ['order_index'], unique=False)
 
     # Create profile_answers table
-    op.create_table(
-        'profile_answers',
+    if 'profile_answers' not in existing_tables:
+        op.create_table(
+            'profile_answers',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('question_id', sa.Integer(), nullable=False),
@@ -84,10 +95,10 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('user_id', 'question_id', 'version', name='uq_profile_answer_version')
     )
-    op.create_index(op.f('ix_profile_answers_user_id'), 'profile_answers', ['user_id'], unique=False)
-    op.create_index(op.f('ix_profile_answers_question_id'), 'profile_answers', ['question_id'], unique=False)
+        op.create_index(op.f('ix_profile_answers_user_id'), 'profile_answers', ['user_id'], unique=False)
+        op.create_index(op.f('ix_profile_answers_question_id'), 'profile_answers', ['question_id'], unique=False)
 
-    # Insert initial data for standard sections
+    # Insert initial data for standard sections (only if tables were just created)
     profile_sections = table(
         'profile_sections',
         column('id', Integer),

@@ -3,10 +3,8 @@ import sys
 import os
 
 # Исправленные импорты: указываем папку db
-from db.database import engine, Base
-from db.models import Step, Question 
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.asyncio import AsyncSession
+from db.database import engine, async_session_factory, Base
+from db.models import Step, Question
 
 # Данные для вставки
 DATA = [
@@ -198,11 +196,6 @@ DATA = [
   }
 ]
 
-# Настройка сессии
-async_session = sessionmaker(
-    engine, expire_on_commit=False, class_=AsyncSession
-)
-
 async def initialize_db_and_seed():
     # Создание таблиц (если они еще не созданы)
     async with engine.begin() as conn:
@@ -210,7 +203,7 @@ async def initialize_db_and_seed():
         print("Таблицы проверены/созданы.")
 
     # Вставка данных
-    async with async_session() as session:
+    async with async_session_factory() as session:
         async with session.begin():
             # Сначала проверяем, пуста ли таблица Step, чтобы не дублировать данные
             # (опционально, но полезно)

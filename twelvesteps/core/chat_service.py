@@ -1,6 +1,9 @@
 from typing import List, Dict, Any
+from datetime import datetime
+import json
 
 from sqlalchemy import select, update
+from openai import AsyncOpenAI
 
 from api.schemas import ChatResponse, Log
 from assistant.assistant import Assistant
@@ -11,6 +14,7 @@ from db.models import Frame as FrameModel, SenderRole, User
 from llm.openai_provider import ClassificationResult, OpenAI
 from repositories import MessageRepository, PromptRepository, UserRepository
 from repositories.FrameRepository import FrameRepository
+from services.vector_store import VectorStoreService
 from services.profile import ProfileService
 
 # ... [Helper functions: classification_to_string, _extract_blocks_from_parts, _build_helper_prompt remain unchanged] ...
@@ -109,24 +113,109 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
     
     async with async_session_factory() as session:
         frame_repo = FrameRepository(session)
+        vector_store = VectorStoreService()
+        openai_client = AsyncOpenAI()
+        
         if parts and getattr(parts, "parts", None):
             for part in parts.parts:
                 block_titles = getattr(part, "blocks", []) or []
                 if not block_titles:
                     continue
-                await frame_repo.add_frame(
+                
+                # Save frame to database
+                frame = await frame_repo.add_frame(
                     content=part.part,
                     emotion=part.emotion,
                     weight=part.importance,
                     user_id=user_id,
                     block_titles=block_titles,
+                    thinking_frame=getattr(part, "thinking_frame", None),
+                    level_of_mind=getattr(part, "level_of_mind", None),
+                    memory_type=getattr(part, "memory_type", None),
+                    target_block=getattr(part, "target_block", None),
+                    action=getattr(part, "action", None),
+                    strategy_hint=getattr(part, "strategy_hint", None),
                 )
+                
+                # Create embedding and save to vector store
+                try:
+                    embedding_response = await openai_client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=part.part
+                    )
+                    embedding = embedding_response.data[0].embedding
+                    
+                    # Save to vector store (synchronous operation)
+                    vector_store.add_frame_embedding(
+                        frame_id=frame.id,
+                        content=part.part,
+                        embedding=embedding,
+                        metadata={
+                            "user_id": user_id,
+                            "emotion": part.emotion,
+                            "blocks": ",".join(block_titles),
+                            "thinking_frame": getattr(part, "thinking_frame", "") or "",
+                            "memory_type": getattr(part, "memory_type", "") or "",
+                        }
+                    )
+                except Exception as e:
+                    # Log error but don't fail the request
+                    if debug:
+                        print(f"[handle_chat] Error creating embedding for frame {frame.id}: {e}")
 
-        relevant_frames = await frame_repo.get_relevant_frames(
+        # Get frames by blocks (existing method)
+        block_based_frames = await frame_repo.get_relevant_frames(
             user_id=user_id,
             block_titles=blocks_in_message,
             limit=5,
         )
+        
+        # Semantic search (NEW)
+        semantic_frames = []
+        try:
+            # Create embedding for the message
+            embedding_response = await openai_client.embeddings.create(
+                model="text-embedding-3-small",
+                input=message
+            )
+            query_embedding = embedding_response.data[0].embedding
+            
+            # Search in vector store
+            semantic_results = await vector_store.search_frames(
+                query_embedding=query_embedding,
+                user_id=user_id,
+                limit=5
+            )
+            
+            # Get frame IDs from results
+            if semantic_results.get("ids") and len(semantic_results["ids"][0]) > 0:
+                semantic_frame_ids = [int(frame_id) for frame_id in semantic_results["ids"][0]]
+                semantic_frames = await frame_repo.get_frames_by_ids(semantic_frame_ids)
+        except Exception as e:
+            # Log error but don't fail the request
+            if debug:
+                print(f"[handle_chat] Error in semantic search: {e}")
+        
+        # Combine and deduplicate frames
+        all_frame_ids = set()
+        relevant_frames = []
+        
+        # Add block-based frames
+        for frame in block_based_frames:
+            if frame.id not in all_frame_ids:
+                relevant_frames.append(frame)
+                all_frame_ids.add(frame.id)
+        
+        # Add semantic frames (avoid duplicates)
+        for frame in semantic_frames:
+            if frame.id not in all_frame_ids:
+                relevant_frames.append(frame)
+                all_frame_ids.add(frame.id)
+        
+        # Sort by weight and limit
+        relevant_frames.sort(key=lambda f: f.weight or 0, reverse=True)
+        relevant_frames = relevant_frames[:5]
+        
         await session.commit()
 
     # 3. Подготовка промптов (Existing logic)
@@ -178,6 +267,12 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             
             if debug:
                 print(f"[Profile Updated] ID: {user_id} | New Info: {analysis_result.extracted_info}")
+    
+    # IMPORTANT: Always update personalized prompt with ALL answers (onboarding + profile + steps)
+    # This ensures the bot has a complete picture of the user from ALL their answers
+    async with async_session_factory() as session:
+        from services.personalization_service import update_personalized_prompt_from_all_answers
+        await update_personalized_prompt_from_all_answers(session, user_id)
 
     # ==================================================================================
     

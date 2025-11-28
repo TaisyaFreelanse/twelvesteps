@@ -15,6 +15,7 @@ from api.schemas import (
     StepInfoResponse,
     StepListResponse,
     StepQuestionsResponse,
+    StepQuestionItem,
     DraftRequest,
     DraftResponse,
     PreviousAnswerResponse,
@@ -79,6 +80,26 @@ load_dotenv(env_path)
 
 app = FastAPI(title="12STEPS Chat API")
 
+def build_user_schema(user) -> UserSchema:
+    """Build UserSchema from User model."""
+    return UserSchema(
+        id=user.id,
+        telegram_id=user.telegram_id,
+        username=user.username,
+        first_name=user.first_name,
+        display_name=user.display_name,
+        role=user.user_role.value if user.user_role else None,
+        program_experience=user.program_experience,
+        sobriety_date=user.sobriety_date,
+        personal_prompt=user.personal_prompt,
+        relapse_dates=user.relapse_dates,
+        sponsor_ids=user.sponsor_ids,
+        custom_fields=user.custom_fields,
+        last_active=user.last_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at
+    )
+
 @app.post("/auth/telegram", response_model=TelegramAuthResponse)
 async def auth_telegram_endpoint(
     payload: TelegramAuthRequest,
@@ -96,27 +117,8 @@ async def auth_telegram_endpoint(
             first_name=payload.first_name
         )
         
-        # Build user schema
-        user_schema = UserSchema(
-            id=user.id,
-            telegram_id=user.telegram_id,
-            username=user.username,
-            first_name=user.first_name,
-            display_name=user.display_name,
-            role=user.role.value if user.role else None,
-            program_experience=user.program_experience,
-            sobriety_date=user.sobriety_date,
-            personal_prompt=user.personal_prompt,
-            relapse_dates=user.relapse_dates,
-            sponsor_ids=user.sponsor_ids,
-            custom_fields=user.custom_fields,
-            last_active=user.last_active,
-            created_at=user.created_at,
-            updated_at=user.updated_at
-        )
-        
         return TelegramAuthResponse(
-            user=user_schema,
+            user=build_user_schema(user),
             is_new=is_new,
             access_token=user.api_key
         )
@@ -231,6 +233,13 @@ async def update_profile(
     service = UserService(current_user.session)
     updates = payload.model_dump(exclude_unset=True)
     user = await service.update_profile(current_user.user, updates)
+    
+    # IMPORTANT: Update personalized prompt when onboarding data changes
+    # This ensures the bot "remembers" onboarding answers from the start
+    if any(key in updates for key in ['display_name', 'program_experience', 'sobriety_date']):
+        from services.personalization_service import update_personalized_prompt_from_all_answers
+        await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
     return build_user_schema(user)
 
 
@@ -306,12 +315,112 @@ async def get_all_steps(
     steps = await service.get_all_steps()
     return StepListResponse(steps=steps)
 
+# IMPORTANT: This route must be defined BEFORE /steps/{step_id}/questions
+# to avoid FastAPI treating "current" as a step_id parameter
+@app.get("/steps/current/questions")  # Temporarily removed response_model for debugging
+async def get_current_step_questions(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get list of questions for current step"""
+    import logging
+    from sqlalchemy import select
+    from db.models import Step, UserStep, StepProgressStatus
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        service = StepFlowService(current_context.session)
+        
+        # Get current step
+        stmt_user_step = select(UserStep).where(
+            UserStep.user_id == current_context.user.id,
+            UserStep.status == StepProgressStatus.IN_PROGRESS
+        )
+        result = await current_context.session.execute(stmt_user_step)
+        current_user_step = result.scalars().first()
+        
+        if not current_user_step:
+            raise HTTPException(status_code=404, detail="No step in progress")
+        
+        # Get step to get step number
+        stmt_step = select(Step).where(Step.id == current_user_step.step_id)
+        result_step = await current_context.session.execute(stmt_step)
+        step = result_step.scalars().first()
+        
+        if not step:
+            raise HTTPException(status_code=404, detail="Step not found")
+        
+        logger.info(f"Getting questions for step_id={step.id}, step.index={step.index}")
+        
+        questions = await service.get_current_step_questions(current_context.user.id)
+        logger.info(f"Retrieved {len(questions)} questions: {questions}")
+        
+        # Convert dict list to StepQuestionItem list
+        question_items = []
+        for q in questions:
+            try:
+                # Ensure we have both id and text
+                if not isinstance(q, dict):
+                    logger.error(f"Question is not a dict: {q}, type: {type(q)}")
+                    continue
+                if "id" not in q or "text" not in q:
+                    logger.error(f"Question missing id or text: {q}")
+                    continue
+                question_items.append(StepQuestionItem(id=int(q["id"]), text=str(q["text"])))
+            except (KeyError, TypeError, ValueError) as e:
+                logger.error(f"Error converting question to StepQuestionItem: {q}, error: {e}")
+                continue
+        
+        # Ensure step.index is not None and is int
+        if step.index is None:
+            logger.warning(f"Step {step.id} has None index, defaulting to 0")
+            step_number = 0
+        else:
+            try:
+                step_number = int(step.index)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error converting step.index to int: {step.index}, error: {e}")
+                step_number = 0
+        
+        # Ensure step_id is int
+        if step.id is None:
+            logger.error(f"Step has None id")
+            raise HTTPException(status_code=500, detail="Step has no id")
+        try:
+            step_id_int = int(step.id)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error converting step.id to int: {step.id}, error: {e}")
+            raise HTTPException(status_code=500, detail="Invalid step id")
+        
+        logger.info(f"Returning response: step_id={step_id_int}, step_number={step_number}, questions_count={len(question_items)}")
+        
+        # Convert question_items to simple dicts
+        questions_list = [{"id": q.id, "text": q.text} for q in question_items]
+        
+        logger.info(f"Questions list: {questions_list}")
+        
+        # Return simple dict without Pydantic validation
+        response_dict = {
+            "step_id": step_id_int,
+            "step_number": step_number,
+            "questions": questions_list
+        }
+        
+        logger.info(f"Returning dict: {response_dict}")
+        return response_dict
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_current_step_questions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 @app.get("/steps/{step_id}/questions", response_model=StepQuestionsResponse)
 async def get_step_questions(
     step_id: int,
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
-    """Get list of questions for a step"""
+    """Get list of questions for a specific step by step_id"""
     from sqlalchemy import select
     from db.models import Step
     
@@ -327,49 +436,25 @@ async def get_step_questions(
     
     questions = await service.get_step_questions(step_id)
     
+    # Convert dict list to StepQuestionItem list
+    question_items = []
+    for q in questions:
+        try:
+            question_items.append(StepQuestionItem(id=q["id"], text=q["text"]))
+        except (KeyError, TypeError) as e:
+            # Log error but continue
+            import logging
+            logging.error(f"Error converting question to StepQuestionItem: {q}, error: {e}")
+            continue
+    
+    # Ensure step.index is not None
+    step_number = step.index if step.index is not None else 0
+    
     return StepQuestionsResponse(
         step_id=step_id,
-        step_number=step.index,
-        questions=questions
+        step_number=step_number,
+        questions=question_items
     )
-
-@app.get("/steps/current/questions", response_model=StepQuestionsResponse)
-async def get_current_step_questions(
-    current_context: CurrentUserContext = Depends(get_current_user)
-):
-    """Get list of questions for current step"""
-    from sqlalchemy import select
-    from db.models import Step, UserStep, StepProgressStatus
-    
-    service = StepFlowService(current_context.session)
-    
-    # Get current step
-    stmt_user_step = select(UserStep).where(
-        UserStep.user_id == current_context.user.id,
-        UserStep.status == StepProgressStatus.IN_PROGRESS
-    )
-    result = await current_context.session.execute(stmt_user_step)
-    current_user_step = result.scalars().first()
-    
-    if not current_user_step:
-        raise HTTPException(status_code=404, detail="No step in progress")
-    
-    # Get step to get step number
-    stmt_step = select(Step).where(Step.id == current_user_step.step_id)
-    result_step = await current_context.session.execute(stmt_step)
-    step = result_step.scalars().first()
-    
-    if not step:
-        raise HTTPException(status_code=404, detail="Step not found")
-    
-    questions = await service.get_current_step_questions(current_context.user.id)
-    
-    return StepQuestionsResponse(
-        step_id=step.id,
-        step_number=step.index,
-        questions=questions
-    )
-
 
 @app.post("/steps/answer")
 async def submit_answer(
@@ -454,6 +539,112 @@ async def switch_to_question(
     
     return StepResponse(message=question_text, is_completed=False)
 
+@app.post("/steps/switch")
+async def switch_step(
+    switch_data: dict,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Switch to a specific step"""
+    step_id = switch_data.get("step_id")
+    if not step_id:
+        raise HTTPException(status_code=400, detail="step_id is required")
+    
+    service = StepFlowService(current_context.session)
+    # Close current step if in progress
+    from sqlalchemy import select
+    from db.models import UserStep, StepProgressStatus
+    stmt = select(UserStep).where(
+        UserStep.user_id == current_context.user.id,
+        UserStep.status == StepProgressStatus.IN_PROGRESS
+    )
+    result = await current_context.session.execute(stmt)
+    current_user_step = result.scalars().first()
+    if current_user_step:
+        current_user_step.status = StepProgressStatus.PAUSED
+    
+    # Initialize new step
+    from db.models import Step
+    stmt_step = select(Step).where(Step.id == step_id)
+    result_step = await current_context.session.execute(stmt_step)
+    step = result_step.scalars().first()
+    
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    # Create or update UserStep
+    stmt_user_step = select(UserStep).where(
+        UserStep.user_id == current_context.user.id,
+        UserStep.step_id == step_id
+    )
+    result_user_step = await current_context.session.execute(stmt_user_step)
+    user_step = result_user_step.scalars().first()
+    
+    if user_step:
+        user_step.status = StepProgressStatus.IN_PROGRESS
+    else:
+        from datetime import datetime
+        user_step = UserStep(
+            user_id=current_context.user.id,
+            step_id=step_id,
+            status=StepProgressStatus.IN_PROGRESS,
+            started_at=datetime.now()
+        )
+        current_context.session.add(user_step)
+    
+    await current_context.session.commit()
+    
+    # Get next question
+    question_text = await service.get_next_question_for_user(current_context.user.id)
+    if not question_text:
+        return StepResponse(message="No questions in this step.", is_completed=True)
+    
+    return StepResponse(message=question_text, is_completed=False)
+
+@app.get("/steps/question/{question_id}")
+async def get_question_detail(
+    question_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get question details"""
+    from sqlalchemy import select
+    from db.models import Question, Step
+    service = StepFlowService(current_context.session)
+    
+    # Get question
+    stmt = select(Question).where(Question.id == question_id)
+    result = await current_context.session.execute(stmt)
+    question = result.scalars().first()
+    
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+    
+    # Get step info
+    stmt_step = select(Step).where(Step.id == question.step_id)
+    result_step = await current_context.session.execute(stmt_step)
+    step = result_step.scalars().first()
+    
+    # Get total questions in step
+    stmt_count = select(Question).where(Question.step_id == question.step_id)
+    result_count = await current_context.session.execute(stmt_count)
+    all_questions = result_count.scalars().all()
+    total_questions = len(all_questions)
+    
+    # Find question number
+    question_number = 1
+    for i, q in enumerate(all_questions, 1):
+        if q.id == question_id:
+            question_number = i
+            break
+    
+    return {
+        "question_id": question_id,
+        "question_text": question.text,
+        "question_number": question_number,
+        "total_questions": total_questions,
+        "step_id": step.id if step else None,
+        "step_number": step.index if step else None
+    }
+
 # --- Steps Settings Endpoints ---
 
 @app.get("/steps/settings", response_model=StepsSettingsResponse)
@@ -536,7 +727,7 @@ async def submit_profile_answer(
     answer_data: ProfileAnswerRequest,
     current_user: CurrentUserContext = Depends(get_current_user)
 ):
-    """Save answer to a profile question"""
+    """Save answer to a profile question and update personalized prompt"""
     service = ProfileService(current_user.session)
     
     # Verify question belongs to section
@@ -556,6 +747,14 @@ async def submit_profile_answer(
         answer_data.question_id,
         answer_data.answer_text
     )
+    
+    # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
+    # This builds a complete picture of the user's character
+    from services.personalization_service import update_personalized_prompt_from_all_answers
+    await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
+    # Commit the transaction to save the answer and updated prompt
+    await current_user.session.commit()
     
     response = {
         "status": "success",
@@ -582,7 +781,7 @@ async def submit_free_text(
     free_text_data: FreeTextRequest,
     current_user: CurrentUserContext = Depends(get_current_user)
 ):
-    """Save free text for a section"""
+    """Save free text to a profile section and update personalized prompt"""
     service = ProfileService(current_user.session)
     
     # Verify section exists
@@ -596,11 +795,60 @@ async def submit_free_text(
         free_text_data.text
     )
     
+    # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
+    # This builds a complete picture of the user's character
+    from services.personalization_service import update_personalized_prompt_from_all_answers
+    await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
+    # Commit the transaction to save the free text and updated prompt
+    await current_user.session.commit()
+    
     return {
         "status": "success",
         "message": "Free text saved",
         "data_id": data.id,
     }
+
+
+@app.post("/profile/free-text")
+async def submit_general_free_text(
+    free_text_data: FreeTextRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """
+    Process general free text (without section_id) and distribute it across profile sections.
+    Uses LLM to analyze and distribute information to appropriate sections.
+    """
+    if free_text_data.section_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint is for general free text only. Use /profile/sections/{section_id}/free-text for specific section."
+        )
+    
+    # Use process_profile_free_text to distribute across sections
+    from core.chat_service import process_profile_free_text
+    
+    try:
+        result = await process_profile_free_text(
+            user_id=current_user.user.id,
+            free_text=free_text_data.text,
+            debug=False
+        )
+        
+        # Update personalized prompt after distribution
+        from services.personalization_service import update_personalized_prompt_from_all_answers
+        await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+        await current_user.session.commit()
+        
+        return {
+            "status": result.get("status", "success"),
+            "message": result.get("message", "Free text processed and distributed"),
+            "saved_sections": result.get("saved_sections", []),
+            "extracted_info": result.get("extracted_info", "")
+        }
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing free text: {str(e)}")
 
 
 @app.post("/profile/sections/custom")
@@ -720,8 +968,22 @@ async def get_templates(
     service = TemplateService(current_user.session)
     templates = await service.get_all_templates(current_user.user.id)
     
+    # Convert templates to schemas, handling enum serialization
+    from api.schemas import AnswerTemplateSchema
+    template_schemas = []
+    for template in templates:
+        template_schemas.append(AnswerTemplateSchema(
+            id=template.id,
+            user_id=template.user_id,
+            name=template.name,
+            template_type=template.template_type.value if hasattr(template.template_type, 'value') else str(template.template_type),
+            structure=template.structure,
+            created_at=template.created_at,
+            updated_at=template.updated_at
+        ))
+    
     return AnswerTemplateListResponse(
-        templates=templates,
+        templates=template_schemas,
         active_template_id=current_user.user.active_template_id
     )
 

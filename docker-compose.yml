@@ -18,6 +18,36 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: ./twelvesteps
+      dockerfile: Dockerfile
+    container_name: twelvesteps_backend
+    env_file:
+      - ./backend.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@postgres:5432/twelvesteps
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  telegram_bot:
+    build:
+      context: ./twelvesteps_tgbot
+      dockerfile: Dockerfile
+    container_name: twelvesteps_telegram_bot
+    env_file:
+      - ./telegram.env
+    environment:
+      BACKEND_API_BASE_URL: http://backend:8000
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:
 

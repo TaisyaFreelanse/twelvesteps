@@ -10,8 +10,8 @@ from db.models import User as UserModel
 
 class ChatRequest(BaseModel):
     telegram_id: str
-    message: str
-    debug : bool
+    message: Optional[str] = None
+    debug: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -70,7 +70,6 @@ class SosResponse(BaseModel):
 
 class SosChatRequest(BaseModel):
     """Request for SOS chat dialog"""
-    telegram_id: int | str
     help_type: Optional[str] = Field(default=None, description="Type of help: question, memory, formulation, support, custom")
     custom_text: Optional[str] = Field(default=None, description="Custom help description if help_type is 'custom'")
     message: Optional[str] = Field(default=None, description="User message in the chat dialog")
@@ -109,11 +108,16 @@ class StepListResponse(BaseModel):
     """List of all steps"""
     steps: list[dict] = Field(default_factory=list)
 
+class StepQuestionItem(BaseModel):
+    """Single question item"""
+    id: int
+    text: str
+
 class StepQuestionsResponse(BaseModel):
     """List of questions for a step"""
     step_id: int
     step_number: int
-    questions: list[dict] = Field(default_factory=list)
+    questions: list[StepQuestionItem] = Field(default_factory=list)
 
 class DraftRequest(BaseModel):
     """Request to save draft"""
@@ -285,6 +289,20 @@ class AnswerTemplateSchema(BaseModel):
     structure: dict  # JSON structure
     created_at: datetime
     updated_at: datetime
+
+    @classmethod
+    def from_orm(cls, obj):
+        """Custom from_orm to handle enum serialization"""
+        data = {
+            "id": obj.id,
+            "user_id": obj.user_id,
+            "name": obj.name,
+            "template_type": obj.template_type.value if hasattr(obj.template_type, 'value') else str(obj.template_type),
+            "structure": obj.structure,
+            "created_at": obj.created_at,
+            "updated_at": obj.updated_at
+        }
+        return cls(**data)
 
     class Config:
         from_attributes = True

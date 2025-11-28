@@ -33,7 +33,16 @@ def get_sync_url() -> str:
     The app uses an async DATABASE_URL (e.g. postgresql+asyncpg://).
     Alembic needs a sync URL (e.g. postgresql+psycopg2://).
     """
-    # Use hardcoded URL to avoid encoding issues with .env file
+    # Try to get DATABASE_URL from environment (for Docker)
+    database_url = os.getenv("DATABASE_URL")
+    
+    if database_url:
+        # Convert async URL to sync URL
+        # postgresql+asyncpg:// -> postgresql+psycopg2://
+        sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        return sync_url
+    
+    # Fallback to default (for local development)
     # This matches the DATABASE_URL in backend.env: postgresql+asyncpg://postgres:password@localhost:5432/twelvesteps
     # Converted to sync driver for Alembic: postgresql+psycopg2://
     return "postgresql+psycopg2://postgres:password@localhost:5432/twelvesteps"

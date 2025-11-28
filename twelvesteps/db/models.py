@@ -126,6 +126,14 @@ class Frame(Base):
         server_default=text("TIMEZONE('utc', now())")
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    
+    # Extended framing fields
+    thinking_frame: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    level_of_mind: Mapped[Optional[int]] = mapped_column(nullable=True)
+    memory_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    target_block: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    strategy_hint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="frames")
     blocks: Mapped[List["Block"]] = relationship(
@@ -492,8 +500,8 @@ class AnswerTemplate(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     
-    # Relationships
-    user: Mapped[Optional["User"]] = relationship()
+    # Relationships - explicitly specify foreign_keys to avoid ambiguity with User.active_template_id
+    user: Mapped[Optional["User"]] = relationship(foreign_keys=[user_id])
 
 
 # --- PROFILE MODELS ---

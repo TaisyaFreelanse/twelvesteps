@@ -1,0 +1,14 @@
+# 1. Остановить и удалить всё
+docker compose down -v
+
+# 2. Удалить старые образы
+docker rmi -f twelvesteps-backend twelvesteps-telegram_bot
+
+# 3. Пересобрать без кеша
+docker compose build --no-cache --pull
+
+# 4. Запустить
+docker compose up -d
+
+# 5. Просмотр логов:
+   docker compose logs -f
