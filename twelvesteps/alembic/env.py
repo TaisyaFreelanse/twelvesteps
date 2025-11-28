@@ -33,13 +33,10 @@ def get_sync_url() -> str:
     The app uses an async DATABASE_URL (e.g. postgresql+asyncpg://).
     Alembic needs a sync URL (e.g. postgresql+psycopg2://).
     """
-    db_url = os.getenv("DATABASE_URL")
-    if db_url:
-        return db_url.replace("+asyncpg", "+psycopg2")
-
-    # Fallback to alembic.ini if env var is not set
-    url = config.get_main_option("sqlalchemy.url")
-    return url.strip('"').strip("'")
+    # Use hardcoded URL to avoid encoding issues with .env file
+    # This matches the DATABASE_URL in backend.env: postgresql+asyncpg://postgres:password@localhost:5432/twelvesteps
+    # Converted to sync driver for Alembic: postgresql+psycopg2://
+    return "postgresql+psycopg2://postgres:password@localhost:5432/twelvesteps"
 
 
 def run_migrations_offline() -> None:

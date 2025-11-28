@@ -1,5 +1,6 @@
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update, func
 from db.models import User as UserModel, UserRole
 from typing import Optional
 
@@ -50,6 +51,8 @@ class UserRepository():
                 first_name=first_name,
                 user_role=UserRole.dependent
             )
+            # Set last_active for new user
+            user.last_active = datetime.now(timezone.utc)
             await session.commit() 
             print("Новый пользователь сохранен.")
         else:
@@ -60,11 +63,25 @@ class UserRepository():
             if first_name and user.first_name != first_name:
                 user.first_name = first_name
                 updated = True
-            if updated:
-                await session.flush()
-                await session.commit()
+            
+            # Always update last_active on any interaction
+            user.last_active = datetime.now(timezone.utc)
+            
+            # Always commit to save last_active update
+            await session.flush()
+            await session.commit()
     
         return user
+    
+    async def update_last_active(self, user_id: int) -> None:
+        """Update last_active timestamp for a user."""
+        stmt = update(UserModel).where(
+            UserModel.id == user_id
+        ).values(
+            last_active=func.now()
+        )
+        await self.db.execute(stmt)
+        await self.db.flush()
     
     async def get_personalized_prompt(self, user_id : int):
         query = select(UserModel).where(UserModel.id == user_id)

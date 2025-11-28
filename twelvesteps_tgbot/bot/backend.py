@@ -6,7 +6,7 @@ from datetime import datetime
 
 import json
 import logging
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
 from pydantic import BaseModel
@@ -86,14 +86,19 @@ class BackendClient:
         """
         return await self._request("GET", "/steps/next", token=access_token)
 
-    async def submit_step_answer(self, access_token: str, text: str) -> bool:
+    async def submit_step_answer(self, access_token: str, text: str, is_template_format: bool = False) -> bool:
         """
         Attempts to submit an answer for the current active step.
         Returns: True if answer was saved, False if no active question was found (400).
         Raises: aiohttp.ClientResponseError for other errors (500, 401, etc).
         """
         try:
-            await self._request("POST", "/steps/answer", token=access_token, json={"text": text})
+            await self._request(
+                "POST", 
+                "/steps/answer", 
+                token=access_token, 
+                json={"text": text, "is_template_format": is_template_format}
+            )
             return True
         except aiohttp.ClientResponseError as e:
             # API returns 400 if there is no active "Tail" (question) to answer
@@ -101,7 +106,168 @@ class BackendClient:
                 return False
             raise e
 
+    async def get_current_step_info(self, access_token: str) -> Dict[str, Any]:
+        """Get current step information with progress indicators"""
+        return await self._request("GET", "/steps/current", token=access_token)
+    
+    async def get_step_detail(self, access_token: str, step_id: int) -> Dict[str, Any]:
+        """Get detailed information about a step"""
+        return await self._request("GET", f"/steps/{step_id}/detail", token=access_token)
+
+    async def get_all_steps(self, access_token: str) -> Dict[str, Any]:
+        """Get list of all steps"""
+        return await self._request("GET", "/steps/list", token=access_token)
+
+    async def get_step_questions(self, access_token: str, step_id: int) -> Dict[str, Any]:
+        """Get list of questions for a step"""
+        return await self._request("GET", f"/steps/{step_id}/questions", token=access_token)
+
+    async def get_current_step_questions(self, access_token: str) -> Dict[str, Any]:
+        """Get list of questions for current step"""
+        return await self._request("GET", "/steps/current/questions", token=access_token)
+
+    async def save_draft(self, access_token: str, draft_text: str) -> Dict[str, Any]:
+        """Save draft answer"""
+        return await self._request("POST", "/steps/draft", token=access_token, json={"draft_text": draft_text})
+
+    async def get_draft(self, access_token: str) -> Dict[str, Any]:
+        """Get draft from active Tail"""
+        return await self._request("GET", "/steps/draft", token=access_token)
+
+    async def get_previous_answer(self, access_token: str, question_id: int) -> Dict[str, Any]:
+        """Get previous answer for a question"""
+        return await self._request("GET", f"/steps/question/{question_id}/previous", token=access_token)
+
+    async def switch_to_question(self, access_token: str, question_id: int) -> Dict[str, Any]:
+        """Switch to a specific question"""
+        return await self._request("POST", "/steps/switch-question", token=access_token, json={"question_id": question_id})
+
+    # --- Steps Settings Functionality ---
+
+    async def get_steps_settings(self, access_token: str) -> Dict[str, Any]:
+        """Get current steps settings"""
+        return await self._request("GET", "/steps/settings", token=access_token)
+
+    async def update_steps_settings(
+        self, 
+        access_token: str,
+        active_template_id: Optional[int] = None,
+        reminders_enabled: Optional[bool] = None,
+        reminder_time: Optional[str] = None,
+        reminder_days: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        """Update steps settings"""
+        payload = {}
+        if active_template_id is not None:
+            payload["active_template_id"] = active_template_id
+        if reminders_enabled is not None:
+            payload["reminders_enabled"] = reminders_enabled
+        if reminder_time is not None:
+            payload["reminder_time"] = reminder_time
+        if reminder_days is not None:
+            payload["reminder_days"] = reminder_days
+        
+        return await self._request("PUT", "/steps/settings", token=access_token, json=payload)
+
     # --- SOS Functionality ---
+
+    async def get_profile_sections(self, access_token: str) -> Dict[str, Any]:
+        """Get all profile sections"""
+        return await self._request("GET", "/profile/sections", token=access_token)
+
+    async def get_section_detail(self, access_token: str, section_id: int) -> Dict[str, Any]:
+        """Get section details with questions"""
+        return await self._request("GET", f"/profile/sections/{section_id}", token=access_token)
+
+    async def submit_profile_answer(
+        self, access_token: str, section_id: int, question_id: int, answer_text: str
+    ) -> Dict[str, Any]:
+        """Submit answer to a profile question"""
+        payload = {"question_id": question_id, "answer_text": answer_text}
+        return await self._request(
+            "POST", f"/profile/sections/{section_id}/answer", token=access_token, json=payload
+        )
+
+    async def submit_free_text(
+        self, access_token: str, section_id: int, text: str
+    ) -> Dict[str, Any]:
+        """Submit free text for a section"""
+        payload = {"text": text}
+        return await self._request(
+            "POST", f"/profile/sections/{section_id}/free-text", token=access_token, json=payload
+        )
+
+    async def create_custom_section(
+        self, access_token: str, name: str, icon: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a custom profile section"""
+        payload = {"name": name, "icon": icon}
+        return await self._request(
+            "POST", "/profile/sections/custom", token=access_token, json=payload
+        )
+
+    async def get_section_summary(self, access_token: str, section_id: int) -> Dict[str, Any]:
+        """Get summary for a section"""
+        return await self._request(
+            "GET", f"/profile/sections/{section_id}/summary", token=access_token
+        )
+
+    async def update_section(
+        self, access_token: str, section_id: int, name: Optional[str] = None,
+        icon: Optional[str] = None, order_index: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Update a custom section"""
+        payload = {}
+        if name is not None:
+            payload["name"] = name
+        if icon is not None:
+            payload["icon"] = icon
+        if order_index is not None:
+            payload["order_index"] = order_index
+        return await self._request(
+            "PUT", f"/profile/sections/{section_id}", token=access_token, json=payload
+        )
+
+    async def delete_section(self, access_token: str, section_id: int) -> Dict[str, Any]:
+        """Delete a custom section"""
+        return await self._request(
+            "DELETE", f"/profile/sections/{section_id}", token=access_token
+        )
+
+    # --- Answer Template Functionality ---
+
+    async def get_templates(self, access_token: str) -> Dict[str, Any]:
+        """Get all available templates"""
+        return await self._request("GET", "/steps/templates", token=access_token)
+
+    async def set_active_template(self, access_token: str, template_id: Optional[int] = None) -> Dict[str, Any]:
+        """Set active template (None to reset to default)"""
+        payload = {"template_id": template_id}
+        return await self._request("PATCH", "/me/template", token=access_token, json=payload)
+
+    # --- SOS Chat Functionality ---
+
+    async def get_sos_message(self, telegram_id: int) -> str:
+        """Get SOS help message (legacy method)"""
+        response = await self._request("POST", "/sos", json={"telegram_id": telegram_id})
+        return response.get("reply", "")
+
+    async def sos_chat(
+        self, 
+        access_token: str, 
+        help_type: Optional[str] = None,
+        custom_text: Optional[str] = None,
+        message: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """Start or continue SOS chat dialog"""
+        payload = {
+            "help_type": help_type,
+            "custom_text": custom_text,
+            "message": message,
+            "conversation_history": conversation_history or []
+        }
+        return await self._request("POST", "/sos/chat", token=access_token, json=payload)
 
     async def get_sos_message(self, telegram_id: int | str) -> str:
         """
@@ -111,6 +277,44 @@ class BackendClient:
         # We use _request to handle base_url, json headers, and error raising automatically
         data = await self._request("POST", "/sos", json=payload)
         return data["reply"]
+
+    # --- Thanks and Day Commands ---
+
+    async def thanks(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
+        """
+        Calls POST /thanks to get a support and motivation message.
+        """
+        payload = {"telegram_id": str(telegram_id), "debug": debug}
+        data = await self._request("POST", "/thanks", json=payload)
+        
+        reply = data.get("reply", "")
+        log_data = data.get("log")
+        log = None
+        if log_data:
+            try:
+                log = Log(**log_data)
+            except Exception:
+                pass
+        
+        return ChatResponse(reply=reply, log=log)
+
+    async def day(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
+        """
+        Calls POST /day to get an analysis and reflection message.
+        """
+        payload = {"telegram_id": str(telegram_id), "debug": debug}
+        data = await self._request("POST", "/day", json=payload)
+        
+        reply = data.get("reply", "")
+        log_data = data.get("log")
+        log = None
+        if log_data:
+            try:
+                log = Log(**log_data)
+            except Exception:
+                pass
+        
+        return ChatResponse(reply=reply, log=log)
 
 
 # ---------------------------------------------------------------------------
@@ -194,8 +398,8 @@ async def process_step_message(
     if not token:
         return None
 
-    # 1. Try to submit answer
-    was_answer = await BACKEND_CLIENT.submit_step_answer(token, text)
+    # 1. Try to submit answer (default is_template_format=False for plain text)
+    was_answer = await BACKEND_CLIENT.submit_step_answer(token, text, is_template_format=False)
 
     if was_answer:
         # 2. If it was an answer, get the immediate next prompt

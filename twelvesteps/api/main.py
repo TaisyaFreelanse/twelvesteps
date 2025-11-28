@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException, APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
@@ -11,23 +12,117 @@ from api.schemas import (
     ProfileUpdateRequest,
     StatusResponse,
     StepResponse,
+    StepInfoResponse,
+    StepListResponse,
+    StepQuestionsResponse,
+    DraftRequest,
+    DraftResponse,
+    PreviousAnswerResponse,
+    SwitchQuestionRequest,
+    StepsSettingsResponse,
+    StepsSettingsUpdateRequest,
     TelegramAuthRequest,
     TelegramAuthResponse,
     UserSchema,
-    build_user_schema,
     # Add these two new schemas:
     SosRequest, 
-    SosResponse
+    SosResponse,
+    SosChatRequest,
+    SosChatResponse,
+    # Profile schemas:
+    ProfileSectionListResponse,
+    ProfileSectionDetailResponse,
+    ProfileSectionDetailSchema,
+    ProfileAnswerRequest,
+    FreeTextRequest,
+    CustomSectionRequest,
+    SectionUpdateRequest,
+    SectionSummaryResponse,
+    # Template schemas:
+    AnswerTemplateSchema,
+    AnswerTemplateListResponse,
+    AnswerTemplateCreateRequest,
+    AnswerTemplateUpdateRequest,
+    ActiveTemplateRequest,
+    # Extended data schemas:
+    SessionStateResponse,
+    SessionStateUpdateRequest,
+    FrameTrackingResponse,
+    FrameTrackingUpdateRequest,
+    QAStatusResponse,
+    QAStatusUpdateRequest,
+    TrackerSummaryResponse,
+    TrackerSummaryCreateRequest,
+    UserMetaResponse,
+    UserMetaUpdateRequest,
 )
 from api.steps import StepFlowService
 # Ensure handle_sos is imported here (assuming you placed it in chat_service)
-from core.chat_service import handle_chat, handle_sos 
+from core.chat_service import handle_chat, handle_sos, handle_thanks, handle_day 
 from services.status import StatusService
 from services.users import UserService
+from services.profile import ProfileService
+from services.template_service import TemplateService
+from services.sos_service import SosService
+from services.steps_settings_service import StepsSettingsService
+from repositories.SessionStateRepository import SessionStateRepository
+from repositories.FrameTrackingRepository import FrameTrackingRepository
+from repositories.QAStatusRepository import QAStatusRepository
+from repositories.UserMetaRepository import UserMetaRepository
+from repositories.TrackerSummaryRepository import TrackerSummaryRepository
+from datetime import date as date_class
+import pathlib
 
-load_dotenv()
+# Load environment variables from backend.env in parent directory
+env_path = pathlib.Path(__file__).parent.parent.parent / "backend.env"
+load_dotenv(env_path)
 
 app = FastAPI(title="12STEPS Chat API")
+
+@app.post("/auth/telegram", response_model=TelegramAuthResponse)
+async def auth_telegram_endpoint(
+    payload: TelegramAuthRequest,
+    session: AsyncSession = Depends(get_db)
+) -> TelegramAuthResponse:
+    """
+    Authenticate or register a Telegram user.
+    Returns user data, whether user is new, and access token (API key).
+    """
+    try:
+        service = UserService(session)
+        user, is_new = await service.authenticate_telegram(
+            telegram_id=payload.telegram_id,
+            username=payload.username,
+            first_name=payload.first_name
+        )
+        
+        # Build user schema
+        user_schema = UserSchema(
+            id=user.id,
+            telegram_id=user.telegram_id,
+            username=user.username,
+            first_name=user.first_name,
+            display_name=user.display_name,
+            role=user.role.value if user.role else None,
+            program_experience=user.program_experience,
+            sobriety_date=user.sobriety_date,
+            personal_prompt=user.personal_prompt,
+            relapse_dates=user.relapse_dates,
+            sponsor_ids=user.sponsor_ids,
+            custom_fields=user.custom_fields,
+            last_active=user.last_active,
+            created_at=user.created_at,
+            updated_at=user.updated_at
+        )
+        
+        return TelegramAuthResponse(
+            user=user_schema,
+            is_new=is_new,
+            access_token=user.api_key
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
@@ -38,8 +133,32 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(exc))
     return reply
 
+@app.post("/thanks", response_model=ChatResponse)
+async def thanks_endpoint(payload: ChatRequest) -> ChatResponse:
+    """
+    /thanks command endpoint. Returns support and motivation message.
+    """
+    try:
+        reply = await handle_thanks(payload.telegram_id, payload.debug)
+        return reply
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
 
-# --- NEW SOS ENDPOINT ---
+@app.post("/day", response_model=ChatResponse)
+async def day_endpoint(payload: ChatRequest) -> ChatResponse:
+    """
+    /day command endpoint. Returns analysis and reflection message.
+    """
+    try:
+        reply = await handle_day(payload.telegram_id, payload.debug)
+        return reply
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# --- SOS ENDPOINTS ---
 @app.post("/sos", response_model=SosResponse)
 async def sos_endpoint(payload: SosRequest) -> SosResponse:
     """
@@ -52,6 +171,35 @@ async def sos_endpoint(payload: SosRequest) -> SosResponse:
         return SosResponse(reply=reply_text)
     except RuntimeError as e:
         # Handle specific errors (like User not found)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/sos/chat", response_model=SosChatResponse)
+async def sos_chat_endpoint(
+    payload: SosChatRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> SosChatResponse:
+    """
+    Handles SOS chat dialog with GPT.
+    Supports different help types and maintains conversation history.
+    """
+    try:
+        service = SosService(current_context.session)
+        result = await service.chat(
+            user_id=current_context.user.id,
+            help_type=payload.help_type,
+            custom_text=payload.custom_text,
+            message=payload.message,
+            conversation_history=payload.conversation_history
+        )
+        return SosChatResponse(
+            reply=result["reply"],
+            is_finished=result["is_finished"],
+            conversation_history=result["conversation_history"]
+        )
+    except RuntimeError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as exc:
         traceback.print_exc()
@@ -113,6 +261,115 @@ async def get_next_step_question(
         is_completed=False
     )
 
+@app.get("/steps/current", response_model=StepInfoResponse)
+async def get_current_step(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get current step information with progress indicators"""
+    service = StepFlowService(current_context.session)
+    step_info = await service.get_current_step_info(current_context.user.id)
+    
+    if not step_info:
+        return StepInfoResponse()
+    
+    return StepInfoResponse(
+        step_id=step_info.get("step_id"),
+        step_number=step_info.get("step_number"),
+        step_title=step_info.get("step_title"),
+        step_description=step_info.get("step_description"),
+        total_steps=step_info.get("total_steps"),
+        answered_questions=step_info.get("answered_questions"),
+        total_questions=step_info.get("total_questions"),
+        status=step_info.get("status")
+    )
+
+@app.get("/steps/{step_id}/detail")
+async def get_step_detail(
+    step_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get detailed information about a specific step"""
+    service = StepFlowService(current_context.session)
+    step_detail = await service.get_step_detail(step_id)
+    
+    if not step_detail:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    return step_detail
+
+@app.get("/steps/list", response_model=StepListResponse)
+async def get_all_steps(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get list of all steps"""
+    service = StepFlowService(current_context.session)
+    steps = await service.get_all_steps()
+    return StepListResponse(steps=steps)
+
+@app.get("/steps/{step_id}/questions", response_model=StepQuestionsResponse)
+async def get_step_questions(
+    step_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get list of questions for a step"""
+    from sqlalchemy import select
+    from db.models import Step
+    
+    service = StepFlowService(current_context.session)
+    
+    # Get step to get step number
+    stmt = select(Step).where(Step.id == step_id)
+    result = await current_context.session.execute(stmt)
+    step = result.scalars().first()
+    
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    questions = await service.get_step_questions(step_id)
+    
+    return StepQuestionsResponse(
+        step_id=step_id,
+        step_number=step.index,
+        questions=questions
+    )
+
+@app.get("/steps/current/questions", response_model=StepQuestionsResponse)
+async def get_current_step_questions(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get list of questions for current step"""
+    from sqlalchemy import select
+    from db.models import Step, UserStep, StepProgressStatus
+    
+    service = StepFlowService(current_context.session)
+    
+    # Get current step
+    stmt_user_step = select(UserStep).where(
+        UserStep.user_id == current_context.user.id,
+        UserStep.status == StepProgressStatus.IN_PROGRESS
+    )
+    result = await current_context.session.execute(stmt_user_step)
+    current_user_step = result.scalars().first()
+    
+    if not current_user_step:
+        raise HTTPException(status_code=404, detail="No step in progress")
+    
+    # Get step to get step number
+    stmt_step = select(Step).where(Step.id == current_user_step.step_id)
+    result_step = await current_context.session.execute(stmt_step)
+    step = result_step.scalars().first()
+    
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+    
+    questions = await service.get_current_step_questions(current_context.user.id)
+    
+    return StepQuestionsResponse(
+        step_id=step.id,
+        step_number=step.index,
+        questions=questions
+    )
+
 
 @app.post("/steps/answer")
 async def submit_answer(
@@ -121,10 +378,15 @@ async def submit_answer(
 ):
     """
     Submits an answer to the currently active question (Tail).
+    Supports both plain text and template-structured JSON answers.
     """
     service = StepFlowService(current_context.session)
     
-    success = await service.save_user_answer(current_context.user.id, answer_data.text)
+    success = await service.save_user_answer(
+        current_context.user.id, 
+        answer_data.text,
+        is_template_format=answer_data.is_template_format
+    )
     
     if not success:
         raise HTTPException(
@@ -133,4 +395,775 @@ async def submit_answer(
         )
     
     return {"status": "success", "message": "Answer saved."}
+
+@app.post("/steps/draft", response_model=DraftResponse)
+async def save_draft(
+    draft_data: DraftRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Save draft answer in Tail.payload without closing Tail"""
+    service = StepFlowService(current_context.session)
+    success = await service.save_draft(current_context.user.id, draft_data.draft_text)
+    
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="No active question found to save draft."
+        )
+    
+    return DraftResponse(success=True, draft=draft_data.draft_text)
+
+@app.get("/steps/draft", response_model=DraftResponse)
+async def get_draft(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get draft from active Tail if exists"""
+    service = StepFlowService(current_context.session)
+    draft = await service.get_active_tail_draft(current_context.user.id)
+    
+    return DraftResponse(success=draft is not None, draft=draft)
+
+@app.get("/steps/question/{question_id}/previous", response_model=PreviousAnswerResponse)
+async def get_previous_answer(
+    question_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get previous answer for a question if exists"""
+    service = StepFlowService(current_context.session)
+    answer_text = await service.get_previous_answer(current_context.user.id, question_id)
+    
+    return PreviousAnswerResponse(question_id=question_id, answer_text=answer_text)
+
+@app.post("/steps/switch-question", response_model=StepResponse)
+async def switch_to_question(
+    switch_data: SwitchQuestionRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Switch to a specific question in current step"""
+    service = StepFlowService(current_context.session)
+    question_text = await service.switch_to_question(
+        current_context.user.id, 
+        switch_data.question_id
+    )
+    
+    if not question_text:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot switch to this question. It may not belong to current step."
+        )
+    
+    return StepResponse(message=question_text, is_completed=False)
+
+# --- Steps Settings Endpoints ---
+
+@app.get("/steps/settings", response_model=StepsSettingsResponse)
+async def get_steps_settings(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get current steps settings for user"""
+    service = StepsSettingsService(current_context.session)
+    settings = await service.get_settings(current_context.user.id)
+    return StepsSettingsResponse(**settings)
+
+@app.put("/steps/settings", response_model=StepsSettingsResponse)
+async def update_steps_settings(
+    settings_data: StepsSettingsUpdateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Update steps settings for user"""
+    service = StepsSettingsService(current_context.session)
+    
+    try:
+        settings = await service.update_settings(
+            user_id=current_context.user.id,
+            active_template_id=settings_data.active_template_id,
+            reminders_enabled=settings_data.reminders_enabled,
+            reminder_time=settings_data.reminder_time,
+            reminder_days=settings_data.reminder_days
+        )
+        return StepsSettingsResponse(**settings)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# --- Profile Endpoints ---
+
+@app.get("/profile/sections", response_model=ProfileSectionListResponse)
+async def get_profile_sections(
+    current_user: CurrentUserContext = Depends(get_current_user)
+) -> ProfileSectionListResponse:
+    """Get all profile sections (standard + user's custom)"""
+    service = ProfileService(current_user.session)
+    sections = await service.get_all_sections(current_user.user.id)
+    return ProfileSectionListResponse(sections=sections)
+
+
+@app.get("/profile/sections/{section_id}", response_model=ProfileSectionDetailResponse)
+async def get_section_detail(
+    section_id: int,
+    current_user: CurrentUserContext = Depends(get_current_user)
+) -> ProfileSectionDetailResponse:
+    """Get section details with questions"""
+    service = ProfileService(current_user.session)
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    # Convert to detail schema with questions
+    detail_schema = ProfileSectionDetailSchema(
+        id=section.id,
+        name=section.name,
+        icon=section.icon,
+        is_custom=section.is_custom,
+        user_id=section.user_id,
+        order_index=section.order_index,
+        created_at=section.created_at,
+        updated_at=section.updated_at,
+        questions=[q for q in section.questions],
+        has_data=getattr(section, 'has_data', False),
+    )
+    
+    return ProfileSectionDetailResponse(section=detail_schema)
+
+
+@app.post("/profile/sections/{section_id}/answer")
+async def submit_profile_answer(
+    section_id: int,
+    answer_data: ProfileAnswerRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Save answer to a profile question"""
+    service = ProfileService(current_user.session)
+    
+    # Verify question belongs to section
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    question_ids = [q.id for q in section.questions]
+    if answer_data.question_id not in question_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Question does not belong to this section"
+        )
+    
+    answer, next_question = await service.save_answer(
+        current_user.user.id,
+        answer_data.question_id,
+        answer_data.answer_text
+    )
+    
+    response = {
+        "status": "success",
+        "message": "Answer saved",
+        "answer_id": answer.id,
+    }
+    
+    # Add next question if available
+    if next_question:
+        response["next_question"] = {
+            "id": next_question.id,
+            "text": next_question.question_text,
+            "is_optional": next_question.is_optional,
+        }
+    else:
+        response["message"] = "Answer saved. All questions in this section are completed."
+    
+    return response
+
+
+@app.post("/profile/sections/{section_id}/free-text")
+async def submit_free_text(
+    section_id: int,
+    free_text_data: FreeTextRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Save free text for a section"""
+    service = ProfileService(current_user.session)
+    
+    # Verify section exists
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    data = await service.save_free_text(
+        current_user.user.id,
+        section_id,
+        free_text_data.text
+    )
+    
+    return {
+        "status": "success",
+        "message": "Free text saved",
+        "data_id": data.id,
+    }
+
+
+@app.post("/profile/sections/custom")
+async def create_custom_section(
+    section_data: CustomSectionRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Create a custom profile section"""
+    service = ProfileService(current_user.session)
+    
+    section = await service.create_custom_section(
+        current_user.user.id,
+        section_data.name,
+        section_data.icon
+    )
+    
+    return {
+        "status": "success",
+        "message": "Custom section created",
+        "section_id": section.id,
+    }
+
+
+@app.get("/profile/sections/{section_id}/summary", response_model=SectionSummaryResponse)
+async def get_section_summary(
+    section_id: int,
+    current_user: CurrentUserContext = Depends(get_current_user)
+) -> SectionSummaryResponse:
+    """Get summary statistics for a section"""
+    service = ProfileService(current_user.session)
+    
+    # Verify section exists
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    summary = await service.get_section_summary(current_user.user.id, section_id)
+    
+    return SectionSummaryResponse(**summary)
+
+
+@app.put("/profile/sections/{section_id}")
+async def update_section(
+    section_id: int,
+    update_data: SectionUpdateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Update a custom section (only custom sections can be updated)"""
+    service = ProfileService(current_user.session)
+    
+    # Verify section exists and is custom
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    if not section.is_custom or section.user_id != current_user.user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only custom sections can be updated by their owner"
+        )
+    
+    updated_section = await service.update_section(
+        section_id,
+        update_data.name,
+        update_data.icon,
+        update_data.order_index
+    )
+    
+    if not updated_section:
+        raise HTTPException(status_code=400, detail="Failed to update section")
+    
+    return {
+        "status": "success",
+        "message": "Section updated",
+        "section_id": updated_section.id,
+    }
+
+
+@app.delete("/profile/sections/{section_id}")
+async def delete_section(
+    section_id: int,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Delete a custom section (only custom sections can be deleted by their owner)"""
+    service = ProfileService(current_user.session)
+    
+    # Verify section exists and is custom
+    section = await service.get_section_detail(section_id, current_user.user.id)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+    
+    if not section.is_custom or section.user_id != current_user.user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only custom sections can be deleted by their owner"
+        )
+    
+    deleted = await service.delete_section(section_id, current_user.user.id)
+    
+    if not deleted:
+        raise HTTPException(status_code=400, detail="Failed to delete section")
+    
+    return {
+        "status": "success",
+        "message": "Section deleted",
+        "section_id": section_id,
+    }
+
+
+# --- Answer Template Endpoints ---
+
+@app.get("/steps/templates", response_model=AnswerTemplateListResponse)
+async def get_templates(
+    current_user: CurrentUserContext = Depends(get_current_user)
+) -> AnswerTemplateListResponse:
+    """Get all available templates (author + user's custom)"""
+    service = TemplateService(current_user.session)
+    templates = await service.get_all_templates(current_user.user.id)
+    
+    return AnswerTemplateListResponse(
+        templates=templates,
+        active_template_id=current_user.user.active_template_id
+    )
+
+
+@app.post("/steps/templates")
+async def create_template(
+    template_data: AnswerTemplateCreateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Create a custom template"""
+    service = TemplateService(current_user.session)
+    
+    template = await service.create_template(
+        current_user.user.id,
+        template_data.name,
+        template_data.structure
+    )
+    
+    return {
+        "status": "success",
+        "message": "Template created",
+        "template_id": template.id,
+    }
+
+
+@app.put("/steps/templates/{template_id}")
+async def update_template(
+    template_id: int,
+    update_data: AnswerTemplateUpdateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Update a custom template (only user's own templates)"""
+    service = TemplateService(current_user.session)
+    
+    updated_template = await service.update_template(
+        template_id,
+        current_user.user.id,
+        update_data.name,
+        update_data.structure
+    )
+    
+    if not updated_template:
+        raise HTTPException(
+            status_code=404,
+            detail="Template not found or you don't have permission to update it"
+        )
+    
+    return {
+        "status": "success",
+        "message": "Template updated",
+        "template_id": updated_template.id,
+    }
+
+
+@app.patch("/me/template")
+async def set_active_template(
+    template_request: ActiveTemplateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Set active template for user (None to reset to default)"""
+    service = TemplateService(current_user.session)
+    
+    success = await service.set_active_template(
+        current_user.user,
+        template_request.template_id
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Template not found or not available"
+        )
+    
+    return {
+        "status": "success",
+        "message": "Active template updated",
+        "template_id": template_request.template_id,
+    }
+
+@app.post("/session/context")
+async def save_session_context(
+    payload: dict,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Save or update session context"""
+    from repositories.SessionContextRepository import SessionContextRepository
+    from db.models import SessionType
+    from api.schemas import SessionContextResponse
+    
+    session_context_repo = SessionContextRepository(current_context.session)
+    
+    # Convert string to enum
+    session_type_map = {
+        "STEPS": SessionType.STEPS,
+        "DAY": SessionType.DAY,
+        "CHAT": SessionType.CHAT
+    }
+    session_type_str = payload.get("session_type", "").upper()
+    session_type = session_type_map.get(session_type_str)
+    if not session_type:
+        raise HTTPException(status_code=400, detail="Invalid session_type")
+    
+    context_data = payload.get("context_data", {})
+    
+    context = await session_context_repo.create_or_update_context(
+        current_context.user.id,
+        session_type,
+        context_data
+    )
+    await current_context.session.commit()
+    
+    return SessionContextResponse(
+        id=context.id,
+        user_id=context.user_id,
+        session_type=context.session_type.value,
+        context_data=context.context_data or {},
+        created_at=context.created_at.isoformat(),
+        updated_at=context.updated_at.isoformat()
+    )
+
+@app.get("/session/context")
+async def get_session_context(
+    session_type: Optional[str] = None,
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get active session context"""
+    from repositories.SessionContextRepository import SessionContextRepository
+    from db.models import SessionType
+    from api.schemas import SessionContextResponse
+    
+    session_context_repo = SessionContextRepository(current_context.session)
+    
+    session_type_enum = None
+    if session_type:
+        session_type_map = {
+            "STEPS": SessionType.STEPS,
+            "DAY": SessionType.DAY,
+            "CHAT": SessionType.CHAT
+        }
+        session_type_enum = session_type_map.get(session_type.upper())
+    
+    context = await session_context_repo.get_active_context(
+        current_context.user.id,
+        session_type_enum
+    )
+    
+    if not context:
+        return None
+    
+    return SessionContextResponse(
+        id=context.id,
+        user_id=context.user_id,
+        session_type=context.session_type.value,
+        context_data=context.context_data or {},
+        created_at=context.created_at.isoformat(),
+        updated_at=context.updated_at.isoformat()
+    )
+
+
+# --- Extended Data Endpoints ---
+
+# SessionState endpoints
+@app.get("/user/state", response_model=SessionStateResponse)
+async def get_user_state(
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> SessionStateResponse:
+    """Get operational state (SessionState) for current user"""
+    repo = SessionStateRepository(current_context.session)
+    state = await repo.get_by_user_id(current_context.user.id)
+    
+    if not state:
+        raise HTTPException(status_code=404, detail="SessionState not found")
+    
+    return SessionStateResponse(
+        id=state.id,
+        user_id=state.user_id,
+        recent_messages=state.recent_messages,
+        daily_snapshot=state.daily_snapshot,
+        active_blocks=state.active_blocks,
+        pending_topics=state.pending_topics,
+        group_signals=state.group_signals,
+        created_at=state.created_at,
+        updated_at=state.updated_at
+    )
+
+
+@app.post("/user/state", response_model=SessionStateResponse)
+async def update_user_state(
+    payload: SessionStateUpdateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> SessionStateResponse:
+    """Update operational state (SessionState) for current user"""
+    repo = SessionStateRepository(current_context.session)
+    state = await repo.create_or_update(
+        user_id=current_context.user.id,
+        recent_messages=payload.recent_messages,
+        daily_snapshot=payload.daily_snapshot,
+        active_blocks=payload.active_blocks,
+        pending_topics=payload.pending_topics,
+        group_signals=payload.group_signals,
+    )
+    await current_context.session.commit()
+    await current_context.session.refresh(state)
+    
+    return SessionStateResponse(
+        id=state.id,
+        user_id=state.user_id,
+        recent_messages=state.recent_messages,
+        daily_snapshot=state.daily_snapshot,
+        active_blocks=state.active_blocks,
+        pending_topics=state.pending_topics,
+        group_signals=state.group_signals,
+        created_at=state.created_at,
+        updated_at=state.updated_at
+    )
+
+
+# FrameTracking endpoints
+@app.get("/user/frames", response_model=FrameTrackingResponse)
+async def get_user_frames(
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> FrameTrackingResponse:
+    """Get frame tracking (FrameTracking) for current user"""
+    repo = FrameTrackingRepository(current_context.session)
+    tracking = await repo.get_by_user_id(current_context.user.id)
+    
+    if not tracking:
+        raise HTTPException(status_code=404, detail="FrameTracking not found")
+    
+    return FrameTrackingResponse(
+        id=tracking.id,
+        user_id=tracking.user_id,
+        confirmed=tracking.confirmed,
+        candidates=tracking.candidates,
+        tracking=tracking.tracking,
+        archetypes=tracking.archetypes,
+        meta_flags=tracking.meta_flags,
+        created_at=tracking.created_at,
+        updated_at=tracking.updated_at
+    )
+
+
+@app.post("/user/frames", response_model=FrameTrackingResponse)
+async def update_user_frames(
+    payload: FrameTrackingUpdateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> FrameTrackingResponse:
+    """Update frame tracking (FrameTracking) for current user"""
+    repo = FrameTrackingRepository(current_context.session)
+    tracking = await repo.create_or_update(
+        user_id=current_context.user.id,
+        confirmed=payload.confirmed,
+        candidates=payload.candidates,
+        tracking=payload.tracking,
+        archetypes=payload.archetypes,
+        meta_flags=payload.meta_flags,
+    )
+    await current_context.session.commit()
+    await current_context.session.refresh(tracking)
+    
+    return FrameTrackingResponse(
+        id=tracking.id,
+        user_id=tracking.user_id,
+        confirmed=tracking.confirmed,
+        candidates=tracking.candidates,
+        tracking=tracking.tracking,
+        archetypes=tracking.archetypes,
+        meta_flags=tracking.meta_flags,
+        created_at=tracking.created_at,
+        updated_at=tracking.updated_at
+    )
+
+
+# QAStatus endpoints
+@app.get("/user/qa-status", response_model=QAStatusResponse)
+async def get_user_qa_status(
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> QAStatusResponse:
+    """Get QA status for current user"""
+    repo = QAStatusRepository(current_context.session)
+    qa_status = await repo.get_by_user_id(current_context.user.id)
+    
+    if not qa_status:
+        raise HTTPException(status_code=404, detail="QAStatus not found")
+    
+    return QAStatusResponse(
+        id=qa_status.id,
+        user_id=qa_status.user_id,
+        last_prompt_included=qa_status.last_prompt_included,
+        trace_ok=qa_status.trace_ok,
+        open_threads=qa_status.open_threads,
+        rebuild_required=qa_status.rebuild_required,
+        created_at=qa_status.created_at,
+        updated_at=qa_status.updated_at
+    )
+
+
+@app.post("/user/qa-status", response_model=QAStatusResponse)
+async def update_user_qa_status(
+    payload: QAStatusUpdateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> QAStatusResponse:
+    """Update QA status for current user"""
+    repo = QAStatusRepository(current_context.session)
+    qa_status = await repo.create_or_update(
+        user_id=current_context.user.id,
+        last_prompt_included=payload.last_prompt_included,
+        trace_ok=payload.trace_ok,
+        open_threads=payload.open_threads,
+        rebuild_required=payload.rebuild_required,
+    )
+    await current_context.session.commit()
+    await current_context.session.refresh(qa_status)
+    
+    return QAStatusResponse(
+        id=qa_status.id,
+        user_id=qa_status.user_id,
+        last_prompt_included=qa_status.last_prompt_included,
+        trace_ok=qa_status.trace_ok,
+        open_threads=qa_status.open_threads,
+        rebuild_required=qa_status.rebuild_required,
+        created_at=qa_status.created_at,
+        updated_at=qa_status.updated_at
+    )
+
+
+# TrackerSummary endpoints
+@app.get("/user/tracker-summary", response_model=TrackerSummaryResponse)
+async def get_user_tracker_summary(
+    date: Optional[date_class] = None,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TrackerSummaryResponse:
+    """Get tracker summary for current user (by date or latest)"""
+    repo = TrackerSummaryRepository(current_context.session)
+    
+    if date:
+        summary = await repo.get_by_user_and_date(current_context.user.id, date)
+    else:
+        summary = await repo.get_latest(current_context.user.id)
+    
+    if not summary:
+        raise HTTPException(status_code=404, detail="TrackerSummary not found")
+    
+    return TrackerSummaryResponse(
+        id=summary.id,
+        user_id=summary.user_id,
+        thinking=summary.thinking,
+        feeling=summary.feeling,
+        behavior=summary.behavior,
+        relationships=summary.relationships,
+        health=summary.health,
+        date=summary.date,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at
+    )
+
+
+@app.post("/user/tracker-summary", response_model=TrackerSummaryResponse)
+async def create_or_update_tracker_summary(
+    payload: TrackerSummaryCreateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TrackerSummaryResponse:
+    """Create or update tracker summary for current user"""
+    repo = TrackerSummaryRepository(current_context.session)
+    summary = await repo.create_or_update(
+        user_id=current_context.user.id,
+        thinking=payload.thinking,
+        feeling=payload.feeling,
+        behavior=payload.behavior,
+        relationships=payload.relationships,
+        health=payload.health,
+        summary_date=payload.date,
+    )
+    await current_context.session.commit()
+    await current_context.session.refresh(summary)
+    
+    return TrackerSummaryResponse(
+        id=summary.id,
+        user_id=summary.user_id,
+        thinking=summary.thinking,
+        feeling=summary.feeling,
+        behavior=summary.behavior,
+        relationships=summary.relationships,
+        health=summary.health,
+        date=summary.date,
+        created_at=summary.created_at,
+        updated_at=summary.updated_at
+    )
+
+
+# UserMeta endpoints
+@app.get("/user/meta", response_model=UserMetaResponse)
+async def get_user_meta(
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> UserMetaResponse:
+    """Get user metadata for current user"""
+    repo = UserMetaRepository(current_context.session)
+    meta = await repo.get_by_user_id(current_context.user.id)
+    
+    if not meta:
+        raise HTTPException(status_code=404, detail="UserMeta not found")
+    
+    return UserMetaResponse(
+        id=meta.id,
+        user_id=meta.user_id,
+        metasloy_signals=meta.metasloy_signals,
+        prompt_revision_history=meta.prompt_revision_history,
+        time_zone=meta.time_zone,
+        language=meta.language,
+        data_flags=meta.data_flags,
+        created_at=meta.created_at,
+        updated_at=meta.updated_at
+    )
+
+
+@app.put("/user/meta", response_model=UserMetaResponse)
+async def update_user_meta(
+    payload: UserMetaUpdateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> UserMetaResponse:
+    """Update user metadata for current user"""
+    repo = UserMetaRepository(current_context.session)
+    meta = await repo.create_or_update(
+        user_id=current_context.user.id,
+        metasloy_signals=payload.metasloy_signals,
+        prompt_revision_history=payload.prompt_revision_history,
+        time_zone=payload.time_zone,
+        language=payload.language,
+        data_flags=payload.data_flags,
+    )
+    await current_context.session.commit()
+    await current_context.session.refresh(meta)
+    
+    return UserMetaResponse(
+        id=meta.id,
+        user_id=meta.user_id,
+        metasloy_signals=meta.metasloy_signals,
+        prompt_revision_history=meta.prompt_revision_history,
+        time_zone=meta.time_zone,
+        language=meta.language,
+        data_flags=meta.data_flags,
+        created_at=meta.created_at,
+        updated_at=meta.updated_at
+    )
 

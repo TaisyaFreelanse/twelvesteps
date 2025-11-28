@@ -16,7 +16,9 @@ from bot.config import (
     build_experience_markup,
     build_main_menu_markup,
     build_skip_markup,
+    build_error_markup,
 )
+from bot.utils import is_question
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +146,31 @@ async def handle_self_description(message: Message, state: FSMContext) -> None:
     """
     Takes the user's bio, sends it to the backend chatbot.
     Triggers: Classify -> Analyze Profile -> Update DB -> Reply.
+    
+    Validates input to detect questions and redirect user back to registration context.
     """
+    text = message.text.strip()
+    
+    # Validate input: check if user is asking a question instead of describing themselves
+    if is_question(text):
+        # User asked a question - respond briefly and return to registration context
+        await message.answer(
+            "Это кратко о моих функциях. А теперь, пожалуйста, расскажи о себе, "
+            "чтобы я мог лучше тебя понимать.\n\n"
+            "Как ты себя чувствуешь? Что тебя беспокоит? Или просто пару слов о своей истории.",
+            parse_mode="HTML"
+        )
+        # Stay in self_description state to request data again
+        return
+    
+    # Input is valid - proceed with profile setup
     processing_msg = await message.answer("Настраиваю твой профиль...")
 
     try:
         # Send to backend as a regular message to trigger the Analyzer
         backend_reply = await call_legacy_chat(
             telegram_id=message.from_user.id,
-            text=message.text,
+            text=text,
             debug=False
         )
         
@@ -169,10 +188,20 @@ async def handle_self_description(message: Message, state: FSMContext) -> None:
     except Exception as e:
         logger.error(f"Onboarding Bridge Error: {e}")
         await state.clear()
-        await processing_msg.edit_text("Профиль сохранен, но сервер не ответил. Можем просто продолжить.")
+        try:
+            await processing_msg.delete()
+        except:
+            pass
+        
+        error_text = (
+            "❌ Произошла ошибка при настройке профиля.\n\n"
+            "Профиль может быть частично сохранён, но сервер не ответил.\n\n"
+            "Хочешь начать заново?"
+        )
+        
         await message.answer(
-            "Ты можешь использовать меню для навигации.",
-            reply_markup=build_main_menu_markup()
+            error_text,
+            reply_markup=build_error_markup()
         )
 
 

@@ -48,3 +48,33 @@ class PromptRepository:
         except FileNotFoundError:
             # Fallback string if file is missing, to prevent crash
             return "You are a helpful AA sponsor. Provide a brief, supportive hint."
+    
+    @staticmethod
+    async def load_thanks_prompt():
+        """
+        Loads the system prompt for the /thanks command.
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/thanks.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.dumps(json.loads(content))
+        except FileNotFoundError:
+            return json.dumps({
+                "role": "system",
+                "content": "You are a supportive AA sponsor. Express genuine support and motivation when user uses /thanks."
+            })
+    
+    @staticmethod
+    async def load_day_prompt():
+        """
+        Loads the system prompt for the /day command.
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/day.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.dumps(json.loads(content))
+        except FileNotFoundError:
+            return json.dumps({
+                "role": "system",
+                "content": "You are a supportive AA sponsor. Help user analyze their current state when they use /day."
+            })

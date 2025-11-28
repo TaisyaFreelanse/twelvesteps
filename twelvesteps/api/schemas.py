@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Optional, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -42,6 +42,10 @@ class UserSchema(BaseModel):
     program_experience: Optional[str] = None
     sobriety_date: Optional[date] = None
     personal_prompt: Optional[str] = None
+    relapse_dates: Optional[List[str]] = None  # JSON массив дат в формате YYYY-MM-DD
+    sponsor_ids: Optional[List[int]] = None  # JSON массив ID спонсоров
+    custom_fields: Optional[Dict[str, Any]] = None  # JSON для целей, важных людей, формата поддержки
+    last_active: Optional[datetime] = None  # Обновляется при каждом взаимодействии
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -62,7 +66,21 @@ class SosRequest(BaseModel):
     telegram_id: int | str
 
 class SosResponse(BaseModel):
-    reply: str    
+    reply: str
+
+class SosChatRequest(BaseModel):
+    """Request for SOS chat dialog"""
+    telegram_id: int | str
+    help_type: Optional[str] = Field(default=None, description="Type of help: question, memory, formulation, support, custom")
+    custom_text: Optional[str] = Field(default=None, description="Custom help description if help_type is 'custom'")
+    message: Optional[str] = Field(default=None, description="User message in the chat dialog")
+    conversation_history: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Previous messages in the conversation")
+
+class SosChatResponse(BaseModel):
+    """Response from SOS chat dialog"""
+    reply: str
+    is_finished: bool = Field(default=False, description="Whether the conversation is finished and should ask about saving draft")
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list, description="Updated conversation history")    
 
 class OpenStepQuestion(BaseModel):
     step_id: int
@@ -70,10 +88,65 @@ class OpenStepQuestion(BaseModel):
 
 class AnswerRequest(BaseModel):
     text: str
+    is_template_format: bool = Field(default=False, description="Whether answer is in template JSON format")
 
 class StepResponse(BaseModel):
     message: str
     is_completed: bool = False
+
+class StepInfoResponse(BaseModel):
+    """Current step information"""
+    step_id: Optional[int] = None
+    step_number: Optional[int] = None
+    step_title: Optional[str] = None
+    step_description: Optional[str] = None
+    total_steps: Optional[int] = None
+    answered_questions: Optional[int] = None
+    total_questions: Optional[int] = None
+    status: Optional[str] = None
+
+class StepListResponse(BaseModel):
+    """List of all steps"""
+    steps: list[dict] = Field(default_factory=list)
+
+class StepQuestionsResponse(BaseModel):
+    """List of questions for a step"""
+    step_id: int
+    step_number: int
+    questions: list[dict] = Field(default_factory=list)
+
+class DraftRequest(BaseModel):
+    """Request to save draft"""
+    draft_text: str
+
+class DraftResponse(BaseModel):
+    """Response for draft operations"""
+    success: bool
+    draft: Optional[str] = None
+
+class PreviousAnswerResponse(BaseModel):
+    """Response with previous answer"""
+    question_id: int
+    answer_text: Optional[str] = None
+
+class SwitchQuestionRequest(BaseModel):
+    """Request to switch to a specific question"""
+    question_id: int
+
+class StepsSettingsResponse(BaseModel):
+    """Response with current steps settings"""
+    active_template_id: Optional[int] = None
+    active_template_name: Optional[str] = None
+    reminders_enabled: bool = Field(default=False)
+    reminder_time: Optional[str] = Field(default=None, description="Time in HH:MM format")
+    reminder_days: Optional[List[int]] = Field(default_factory=list, description="Days of week (0-6, Monday=0)")
+
+class StepsSettingsUpdateRequest(BaseModel):
+    """Request to update steps settings"""
+    active_template_id: Optional[int] = None
+    reminders_enabled: Optional[bool] = None
+    reminder_time: Optional[str] = Field(default=None, description="Time in HH:MM format")
+    reminder_days: Optional[List[int]] = Field(default=None, description="Days of week (0-6, Monday=0)")
 
 class StatusTail(BaseModel):
     id: int
@@ -103,3 +176,241 @@ def build_user_schema(user: UserModel) -> UserSchema:
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+# --- PROFILE SCHEMAS ---
+
+class ProfileQuestionSchema(BaseModel):
+    id: int
+    section_id: int
+    question_text: str
+    order_index: int
+    is_optional: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileAnswerSchema(BaseModel):
+    id: int
+    user_id: int
+    question_id: int
+    answer_text: str
+    version: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileSectionDataSchema(BaseModel):
+    id: int
+    user_id: int
+    section_id: int
+    content: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileSectionSchema(BaseModel):
+    id: int
+    name: str
+    icon: Optional[str] = None
+    is_custom: bool
+    user_id: Optional[int] = None
+    order_index: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileSectionDetailSchema(ProfileSectionSchema):
+    questions: list[ProfileQuestionSchema] = Field(default_factory=list)
+    has_data: bool = False  # Есть ли данные у пользователя для этого раздела
+
+    class Config:
+        from_attributes = True
+
+
+class ProfileSectionListResponse(BaseModel):
+    sections: list[ProfileSectionSchema]
+
+
+class ProfileSectionDetailResponse(BaseModel):
+    section: ProfileSectionDetailSchema
+
+
+class ProfileAnswerRequest(BaseModel):
+    question_id: int
+    answer_text: str = Field(..., min_length=1)
+
+
+class FreeTextRequest(BaseModel):
+    section_id: Optional[int] = None  # Если None - общий свободный рассказ
+    text: str = Field(..., min_length=1)
+
+
+class CustomSectionRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    icon: Optional[str] = None
+
+
+class SectionUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+    order_index: Optional[int] = None
+
+
+class SectionSummaryResponse(BaseModel):
+    section_id: int
+    section_name: str
+    questions_count: int
+    answers_count: int
+    last_updated: Optional[datetime] = None
+
+
+# --- ANSWER TEMPLATE SCHEMAS ---
+
+class AnswerTemplateSchema(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    name: str
+    template_type: str  # "AUTHOR" or "CUSTOM"
+    structure: dict  # JSON structure
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AnswerTemplateListResponse(BaseModel):
+    templates: list[AnswerTemplateSchema]
+    active_template_id: Optional[int] = None
+
+
+class AnswerTemplateCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    structure: dict = Field(..., description="JSON structure of the template")
+
+
+class AnswerTemplateUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    structure: Optional[dict] = None
+
+
+class ActiveTemplateRequest(BaseModel):
+    template_id: Optional[int] = None  # None to reset to default
+
+
+# --- Extended Data Schemas ---
+
+# SessionState schemas
+class SessionStateResponse(BaseModel):
+    id: int
+    user_id: int
+    recent_messages: Optional[List[Dict[str, Any]]] = None
+    daily_snapshot: Optional[Dict[str, Any]] = None
+    active_blocks: Optional[List[str]] = None
+    pending_topics: Optional[List[str]] = None
+    group_signals: Optional[List[str]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionStateUpdateRequest(BaseModel):
+    recent_messages: Optional[List[Dict[str, Any]]] = None
+    daily_snapshot: Optional[Dict[str, Any]] = None
+    active_blocks: Optional[List[str]] = None
+    pending_topics: Optional[List[str]] = None
+    group_signals: Optional[List[str]] = None
+
+
+# FrameTracking schemas
+class FrameTrackingResponse(BaseModel):
+    id: int
+    user_id: int
+    confirmed: Optional[List[Dict[str, Any]]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None
+    tracking: Optional[Dict[str, Any]] = None
+    archetypes: Optional[List[str]] = None
+    meta_flags: Optional[List[str]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FrameTrackingUpdateRequest(BaseModel):
+    confirmed: Optional[List[Dict[str, Any]]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None
+    tracking: Optional[Dict[str, Any]] = None
+    archetypes: Optional[List[str]] = None
+    meta_flags: Optional[List[str]] = None
+
+
+# QAStatus schemas
+class QAStatusResponse(BaseModel):
+    id: int
+    user_id: int
+    last_prompt_included: Optional[bool] = None
+    trace_ok: Optional[bool] = None
+    open_threads: Optional[int] = None
+    rebuild_required: Optional[bool] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QAStatusUpdateRequest(BaseModel):
+    last_prompt_included: Optional[bool] = None
+    trace_ok: Optional[bool] = None
+    open_threads: Optional[int] = None
+    rebuild_required: Optional[bool] = None
+
+
+# TrackerSummary schemas
+class TrackerSummaryResponse(BaseModel):
+    id: int
+    user_id: int
+    thinking: Optional[List[str]] = None
+    feeling: Optional[List[str]] = None
+    behavior: Optional[List[str]] = None
+    relationships: Optional[List[str]] = None
+    health: Optional[List[str]] = None
+    date: date
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrackerSummaryCreateRequest(BaseModel):
+    thinking: Optional[List[str]] = None
+    feeling: Optional[List[str]] = None
+    behavior: Optional[List[str]] = None
+    relationships: Optional[List[str]] = None
+    health: Optional[List[str]] = None
+    date: Optional[date] = None  # Если не указана, используется сегодняшняя дата
+
+
+# UserMeta schemas
+class UserMetaResponse(BaseModel):
+    id: int
+    user_id: int
+    metasloy_signals: Optional[List[str]] = None
+    prompt_revision_history: Optional[int] = None
+    time_zone: Optional[str] = None
+    language: Optional[str] = None
+    data_flags: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class UserMetaUpdateRequest(BaseModel):
+    metasloy_signals: Optional[List[str]] = None
+    prompt_revision_history: Optional[int] = None
+    time_zone: Optional[str] = None
+    language: Optional[str] = None
+    data_flags: Optional[Dict[str, Any]] = None

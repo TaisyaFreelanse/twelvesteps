@@ -78,4 +78,8 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
+    # Update last_active on API interaction
+    await repo.update_last_active(user.id)
+    await session.commit()
+
     return CurrentUserContext(user=user, session=session)

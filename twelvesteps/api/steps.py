@@ -8,12 +8,187 @@ from sqlalchemy.orm import selectinload
 
 from db.models import (
     Step, Question, StepAnswer, UserStep, 
-    Tail, TailType, StepProgressStatus
+    Tail, TailType, StepProgressStatus, User, AnswerTemplate
 )
+import json
 
 class StepFlowService:
     def __init__(self, session: AsyncSession):
         self.session = session
+    
+    async def get_current_step_info(self, user_id: int) -> Optional[dict]:
+        """Get current step information including step number"""
+        from sqlalchemy.orm import selectinload
+        
+        # Find current step in progress
+        stmt_user_step = select(UserStep).where(
+            UserStep.user_id == user_id,
+            UserStep.status == StepProgressStatus.IN_PROGRESS
+        )
+        
+        result = await self.session.execute(stmt_user_step)
+        current_user_step = result.scalars().first()
+        
+        if not current_user_step:
+            # Try to initialize next step
+            current_user_step = await self._initialize_next_step(user_id)
+            if not current_user_step:
+                return None
+        
+        # Get step by step_id
+        stmt_step = select(Step).where(Step.id == current_user_step.step_id)
+        result_step = await self.session.execute(stmt_step)
+        step = result_step.scalars().first()
+        
+        if not step:
+            return None
+        
+        # Get total number of steps
+        stmt_total = select(Step).order_by(Step.index.desc()).limit(1)
+        result_total = await self.session.execute(stmt_total)
+        last_step = result_total.scalars().first()
+        total_steps = last_step.index if last_step else 12  # Default to 12 if no steps found
+        
+        # Get answered questions count for current step
+        stmt_answered = select(StepAnswer).where(
+            StepAnswer.user_id == user_id,
+            StepAnswer.step_id == current_user_step.step_id
+        )
+        result_answered = await self.session.execute(stmt_answered)
+        answered_count = len(result_answered.scalars().all())
+        
+        # Get total questions count for current step
+        stmt_questions = select(Question).where(Question.step_id == current_user_step.step_id)
+        result_questions = await self.session.execute(stmt_questions)
+        total_questions = len(result_questions.scalars().all())
+        
+        return {
+            "step_id": step.id,
+            "step_number": step.index,
+            "step_title": step.title,
+            "step_description": step.description,
+            "total_steps": total_steps,
+            "answered_questions": answered_count,
+            "total_questions": total_questions,
+            "status": current_user_step.status.value
+        }
+    
+    async def get_all_steps(self) -> list[dict]:
+        """Get list of all steps"""
+        stmt = select(Step).order_by(Step.index)
+        result = await self.session.execute(stmt)
+        steps = result.scalars().all()
+        
+        return [{"id": s.id, "number": s.index} for s in steps]
+    
+    async def get_step_questions(self, step_id: int) -> list[dict]:
+        """Get list of questions for a step"""
+        stmt = select(Question).where(Question.step_id == step_id).order_by(Question.id)
+        result = await self.session.execute(stmt)
+        questions = result.scalars().all()
+        
+        return [{"id": q.id, "text": q.text} for q in questions]
+    
+    async def save_draft(self, user_id: int, draft_text: str) -> bool:
+        """Save draft answer in Tail.payload without closing Tail"""
+        stmt = select(Tail).where(
+            Tail.user_id == user_id,
+            Tail.tail_type == TailType.STEP_QUESTION,
+            Tail.is_closed == False
+        )
+        result = await self.session.execute(stmt)
+        active_tail = result.scalars().first()
+        
+        if not active_tail:
+            return False
+        
+        # Update payload with draft
+        if active_tail.payload is None:
+            active_tail.payload = {}
+        active_tail.payload["draft"] = draft_text
+        active_tail.payload["draft_saved_at"] = datetime.now().isoformat()
+        
+        await self.session.commit()
+        return True
+    
+    async def get_previous_answer(self, user_id: int, question_id: int) -> Optional[str]:
+        """Get previous answer for a question if exists"""
+        stmt = select(StepAnswer).where(
+            StepAnswer.user_id == user_id,
+            StepAnswer.question_id == question_id
+        ).order_by(desc(StepAnswer.version)).limit(1)
+        
+        result = await self.session.execute(stmt)
+        previous_answer = result.scalars().first()
+        
+        if previous_answer:
+            return previous_answer.answer_text
+        return None
+    
+    async def get_active_tail_draft(self, user_id: int) -> Optional[str]:
+        """Get draft from active Tail if exists"""
+        stmt = select(Tail).where(
+            Tail.user_id == user_id,
+            Tail.tail_type == TailType.STEP_QUESTION,
+            Tail.is_closed == False
+        )
+        result = await self.session.execute(stmt)
+        active_tail = result.scalars().first()
+        
+        if active_tail and active_tail.payload and "draft" in active_tail.payload:
+            return active_tail.payload["draft"]
+        return None
+    
+    async def switch_to_question(self, user_id: int, question_id: int) -> Optional[str]:
+        """Switch to a specific question in current step"""
+        # Get current step
+        stmt_user_step = select(UserStep).where(
+            UserStep.user_id == user_id,
+            UserStep.status == StepProgressStatus.IN_PROGRESS
+        )
+        result = await self.session.execute(stmt_user_step)
+        current_user_step = result.scalars().first()
+        
+        if not current_user_step:
+            return None
+        
+        # Check if question belongs to current step
+        stmt_question = select(Question).where(
+            Question.id == question_id,
+            Question.step_id == current_user_step.step_id
+        )
+        result_q = await self.session.execute(stmt_question)
+        question = result_q.scalars().first()
+        
+        if not question:
+            return None
+        
+        # Close current tail if exists
+        stmt_tail = select(Tail).where(
+            Tail.user_id == user_id,
+            Tail.tail_type == TailType.STEP_QUESTION,
+            Tail.is_closed == False
+        )
+        result_tail = await self.session.execute(stmt_tail)
+        current_tail = result_tail.scalars().first()
+        
+        if current_tail:
+            current_tail.is_closed = True
+            current_tail.closed_at = datetime.now()
+        
+        # Create new tail for selected question
+        new_tail = Tail(
+            user_id=user_id,
+            tail_type=TailType.STEP_QUESTION,
+            step_id=current_user_step.step_id,
+            step_question_id=question_id,
+            is_closed=False,
+            payload={}
+        )
+        self.session.add(new_tail)
+        await self.session.commit()
+        
+        return question.text
 
     async def get_next_question_for_user(self, user_id: int) -> Union[str, None]:
         """
@@ -74,9 +249,11 @@ class StepFlowService:
 
         return next_question.text
 
-    async def save_user_answer(self, user_id: int, answer_text: str) -> bool:
+    async def save_user_answer(self, user_id: int, answer_text: str, is_template_format: bool = False) -> bool:
         """
         Checks for an open Tail, saves the answer, and closes the Tail.
+        If is_template_format is True, answer_text should be a JSON string with template structure.
+        Otherwise, it's treated as plain text.
         """
         # 1. Find the active TAIL
         stmt = select(Tail).where(
@@ -90,22 +267,62 @@ class StepFlowService:
         if not active_tail:
             return False
 
-        # 2. Create the Answer record
+        # 2. Get user and active template
+        stmt_user = select(User).where(User.id == user_id)
+        result_user = await self.session.execute(stmt_user)
+        user = result_user.scalars().first()
+        
+        # 3. Process answer text based on template
+        final_answer_text = answer_text
+        
+        if is_template_format:
+            # Answer is already in template format (JSON string)
+            # Validate it's valid JSON
+            try:
+                template_data = json.loads(answer_text)
+                # Store as formatted JSON string
+                final_answer_text = json.dumps(template_data, ensure_ascii=False, indent=2)
+            except json.JSONDecodeError:
+                # If not valid JSON, treat as plain text
+                final_answer_text = answer_text
+        elif user and user.active_template_id:
+            # User has active template, check if answer might be structured
+            # For now, we save as-is, but could add logic to detect template structure
+            # This is handled in the bot when user fills by template
+            final_answer_text = answer_text
+
+        # 4. Create the Answer record
         new_answer = StepAnswer(
             user_id=user_id,
             step_id=active_tail.step_id,
             question_id=active_tail.step_question_id,
-            answer_text=answer_text,
+            answer_text=final_answer_text,
             version=1
         )
         self.session.add(new_answer)
 
-        # 3. Close the Tail
+        # 5. Close the Tail
         active_tail.is_closed = True
         active_tail.closed_at = datetime.now()
 
         await self.session.commit()
         return True
+    
+    async def get_current_step_questions(self, user_id: int) -> list[dict]:
+        """Get list of questions for current step"""
+        # Get current step
+        stmt_user_step = select(UserStep).where(
+            UserStep.user_id == user_id,
+            UserStep.status == StepProgressStatus.IN_PROGRESS
+        )
+        result = await self.session.execute(stmt_user_step)
+        current_user_step = result.scalars().first()
+        
+        if not current_user_step:
+            return []
+        
+        # Get questions for current step
+        return await self.get_step_questions(current_user_step.step_id)
 
     # --- Helper Methods ---
 

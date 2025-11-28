@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,8 @@ class UserService:
                 display_name=first_name or username,
                 user_role=UserRole.dependent,
             )
+            # Set last_active for new user
+            user.last_active = datetime.now(timezone.utc)
         else:
             if username and user.username != username:
                 user.username = username
@@ -43,6 +46,8 @@ class UserService:
                 user.first_name = first_name
             if not user.display_name and (first_name or username):
                 user.display_name = first_name or username
+            # Update last_active on authentication
+            user.last_active = datetime.now(timezone.utc)
 
         self._ensure_api_key(user)
         await self.session.commit()

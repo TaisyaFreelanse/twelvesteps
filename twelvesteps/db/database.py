@@ -7,7 +7,10 @@ import os
 
 
 
-load_dotenv()
+# Load environment variables from backend.env in parent directory
+import pathlib
+env_path = pathlib.Path(__file__).parent.parent.parent / "backend.env"
+load_dotenv(env_path)
 
 class Base(DeclarativeBase):
 
