@@ -8,6 +8,7 @@ import logging
 import datetime
 
 from aiogram import Dispatcher, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -1995,6 +1996,19 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                             reply_markup=markup
                         )
                         logger.info(f"Successfully edited message with steps list")
+                    except TelegramBadRequest as e:
+                        # Handle "message is not modified" error - this is normal when user clicks button again
+                        if "message is not modified" in str(e).lower():
+                            logger.debug(f"Message not modified (user clicked button again): {e}")
+                            # Message is already showing the steps list, nothing to do
+                        else:
+                            logger.warning(f"TelegramBadRequest when editing message: {e}")
+                            # Fallback: send new message
+                            await callback.message.answer(
+                                "🔢 Выбери шаг для работы:",
+                                reply_markup=markup
+                            )
+                            logger.info(f"Sent new message as fallback")
                     except Exception as edit_error:
                         logger.exception(f"Failed to edit message: {edit_error}")
                         # Fallback: send new message
@@ -2096,23 +2110,42 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
         step_id = int(data.split("_")[-1])
         logger.info(f"Switching to step {step_id} for user {telegram_id}")
         
-        # Switch to selected step
-        await BACKEND_CLIENT.switch_step(token, step_id)
+        # Answer callback early to stop loading spinner
+        await callback.answer(f"Переключаю на шаг {step_id}...")
+        
+        try:
+            # Switch to selected step
+            await BACKEND_CLIENT.switch_step(token, step_id)
+            logger.info(f"Successfully switched to step {step_id}")
+        except Exception as switch_error:
+            logger.exception(f"Failed to switch to step {step_id}: {switch_error}")
+            await callback.answer(f"Ошибка переключения на шаг {step_id}")
+            return
         
         # Get step info
-        step_info = await BACKEND_CLIENT.get_current_step_info(token)
-        step_number = step_info.get("step_number")
-        step_title = step_info.get("step_title", "")
-        step_description = step_info.get("step_description", "")
-        
-        logger.info(f"Step {step_id} info retrieved: step_number={step_number}, title={step_title[:50] if step_title else None}")
+        try:
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            step_number = step_info.get("step_number")
+            step_title = step_info.get("step_title", "")
+            step_description = step_info.get("step_description", "")
+            
+            logger.info(f"Step {step_id} info retrieved: step_number={step_number}, title={step_title[:50] if step_title else None}")
+        except Exception as info_error:
+            logger.exception(f"Failed to get step info for step {step_id}: {info_error}")
+            await callback.answer("Ошибка получения информации о шаге")
+            return
         
         # Get current question
-        step_data = await get_current_step_question(
-            telegram_id=telegram_id,
-            username=username,
-            first_name=first_name
-        )
+        try:
+            step_data = await get_current_step_question(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name
+            )
+        except Exception as question_error:
+            logger.exception(f"Failed to get current question for step {step_id}: {question_error}")
+            await callback.answer("Ошибка получения вопроса")
+            return
         
         if step_data:
             response_text = step_data.get("message", "")
@@ -2129,12 +2162,32 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
                 full_text += f"\n\n{step_description}"
             full_text += f"\n\n{response_text}"
             
-            await callback.answer(f"Выбран шаг {step_number}")  # Answer callback first to stop loading
-            await edit_long_message(
-                callback,
-                full_text,
-                reply_markup=build_step_actions_markup()
-            )
+            try:
+                await edit_long_message(
+                    callback,
+                    full_text,
+                    reply_markup=build_step_actions_markup()
+                )
+            except TelegramBadRequest as e:
+                # Handle "message is not modified" error
+                if "message is not modified" in str(e).lower():
+                    logger.debug(f"Message not modified when selecting step {step_id}: {e}")
+                    # Message is already showing the correct content, nothing to do
+                else:
+                    logger.warning(f"TelegramBadRequest when editing message for step {step_id}: {e}")
+                    # Fallback: send new message
+                    await callback.message.answer(
+                        full_text,
+                        reply_markup=build_step_actions_markup()
+                    )
+            except Exception as edit_error:
+                logger.exception(f"Failed to edit message for step {step_id}: {edit_error}")
+                # Fallback: send new message
+                await callback.message.answer(
+                    full_text,
+                    reply_markup=build_step_actions_markup()
+                )
+            
             await state.set_state(StepState.answering)
         else:
             await callback.answer("Ошибка получения вопроса")
