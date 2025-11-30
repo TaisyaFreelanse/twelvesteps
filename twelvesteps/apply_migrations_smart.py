@@ -138,12 +138,13 @@ def main():
             import traceback
             traceback.print_exc()
         
-        # Initialize steps and questions if they don't exist
-        print('Initializing steps and questions...')
+        # Initialize or update steps and questions (always runs to ensure data is up to date)
+        print('Initializing/updating steps and questions...')
         try:
             import asyncio
             from db.initialize_db import initialize_db_and_seed
             asyncio.run(initialize_db_and_seed())
+            print('✅ Steps and questions initialized/updated!')
         except Exception as e:
             print(f'Warning: Could not initialize steps and questions: {e}')
             import traceback
