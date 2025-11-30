@@ -613,6 +613,12 @@ async def handle_message(message: Message, debug: bool) -> None:
         await send_long_message(message, reply_text, reply_markup=build_main_menu_markup())
 
     except Exception as exc:
+        # Handle "bot was blocked by the user" - this is normal, don't log as error
+        error_msg = str(exc)
+        if "bot was blocked by the user" in error_msg or "Forbidden: bot was blocked" in error_msg:
+            logger.info(f"User {telegram_id} blocked the bot - skipping message")
+            return  # Silently ignore - user blocked the bot
+        
         logger.exception("Failed to get response from backend chat: %s", exc)
         error_text = (
             "❌ Не удалось получить ответ от сервера.\n\n"
