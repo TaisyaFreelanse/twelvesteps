@@ -564,7 +564,9 @@ async def switch_step(
     result = await current_context.session.execute(stmt)
     current_user_step = result.scalars().first()
     if current_user_step:
-        current_user_step.status = StepProgressStatus.PAUSED
+        # Set current step to NOT_STARTED (since PAUSED doesn't exist in enum)
+        # This allows user to resume later without losing progress
+        current_user_step.status = StepProgressStatus.NOT_STARTED
     
     # Initialize new step
     from db.models import Step
