@@ -1965,6 +1965,8 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
     username = callback.from_user.username
     first_name = callback.from_user.first_name
     
+    logger.info(f"Steps navigation callback received: {data} from user {telegram_id}")
+    
     try:
         token = await get_or_fetch_token(telegram_id, username, first_name)
         if not token:
@@ -1973,10 +1975,14 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
         
         if data == "steps_select":
             # Show list of steps
+            logger.info(f"Fetching steps list for user {telegram_id}")
             steps_data = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_data.get("steps", [])
             
+            logger.info(f"Received {len(steps)} steps for user {telegram_id}")
+            
             if steps:
+                await callback.answer()  # Answer callback first to stop loading
                 await edit_long_message(
                     callback,
                     "🔢 Выбери шаг для работы:",
@@ -1996,6 +2002,7 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                 questions = questions_data.get("questions", [])
                 
                 if questions:
+                    await callback.answer()  # Answer callback first to stop loading
                     await edit_long_message(
                         callback,
                         "📋 Вопросы в этом шаге:",
@@ -2018,13 +2025,13 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
             if step_data:
                 response_text = step_data.get("message", "")
                 if response_text:
+                    await callback.answer()  # Answer callback first to stop loading
                     await edit_long_message(
                         callback,
                         response_text,
                         reply_markup=build_step_actions_markup()
                     )
                     await state.set_state(StepState.answering)
-                    await callback.answer()
                 else:
                     await callback.answer("Нет текущего вопроса")
             else:
@@ -2033,6 +2040,7 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
         
         if data == "steps_back":
             # Return to main menu
+            await callback.answer()  # Answer callback first to stop loading
             await state.clear()
             # Edit message without ReplyKeyboardMarkup (edit_text doesn't support it)
             await edit_long_message(
@@ -2042,7 +2050,6 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
             )
             # Send new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await callback.answer()
             return
         
         await callback.answer("Неизвестная команда")
@@ -2059,6 +2066,8 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
     username = callback.from_user.username
     first_name = callback.from_user.first_name
     
+    logger.info(f"Step selection callback received: {data} from user {telegram_id}")
+    
     try:
         token = await get_or_fetch_token(telegram_id, username, first_name)
         if not token:
@@ -2067,6 +2076,7 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
         
         # Extract step ID from callback data (step_select_123)
         step_id = int(data.split("_")[-1])
+        logger.info(f"Switching to step {step_id} for user {telegram_id}")
         
         # Switch to selected step
         await BACKEND_CLIENT.switch_step(token, step_id)
@@ -2076,6 +2086,8 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
         step_number = step_info.get("step_number")
         step_title = step_info.get("step_title", "")
         step_description = step_info.get("step_description", "")
+        
+        logger.info(f"Step {step_id} info retrieved: step_number={step_number}, title={step_title[:50] if step_title else None}")
         
         # Get current question
         step_data = await get_current_step_question(
@@ -2099,13 +2111,13 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
                 full_text += f"\n\n{step_description}"
             full_text += f"\n\n{response_text}"
             
+            await callback.answer(f"Выбран шаг {step_number}")  # Answer callback first to stop loading
             await edit_long_message(
                 callback,
                 full_text,
                 reply_markup=build_step_actions_markup()
             )
             await state.set_state(StepState.answering)
-            await callback.answer(f"Выбран шаг {step_number}")
         else:
             await callback.answer("Ошибка получения вопроса")
         
