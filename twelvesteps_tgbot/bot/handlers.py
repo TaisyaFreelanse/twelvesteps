@@ -1989,8 +1989,8 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                     logger.info(f"Markup created, attempting to edit message")
                     
                     try:
-                        await edit_long_message(
-                            callback,
+                        # Try to edit the message directly
+                        await callback.message.edit_text(
                             "🔢 Выбери шаг для работы:",
                             reply_markup=markup
                         )
