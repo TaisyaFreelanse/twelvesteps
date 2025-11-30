@@ -238,7 +238,9 @@ async def update_profile(
     # This ensures the bot "remembers" onboarding answers from the start
     if any(key in updates for key in ['display_name', 'program_experience', 'sobriety_date']):
         from services.personalization_service import update_personalized_prompt_from_all_answers
-        await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+        # Use the updated user object instead of current_user.user to avoid greenlet issues
+        await update_personalized_prompt_from_all_answers(current_user.session, user.id)
+        await current_user.session.commit()
     
     return build_user_schema(user)
 
