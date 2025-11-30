@@ -1976,20 +1976,38 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
         if data == "steps_select":
             # Show list of steps
             logger.info(f"Fetching steps list for user {telegram_id}")
-            steps_data = await BACKEND_CLIENT.get_steps_list(token)
-            steps = steps_data.get("steps", [])
-            
-            logger.info(f"Received {len(steps)} steps for user {telegram_id}")
-            
-            if steps:
-                await callback.answer()  # Answer callback first to stop loading
-                await edit_long_message(
-                    callback,
-                    "🔢 Выбери шаг для работы:",
-                    reply_markup=build_steps_list_markup(steps)
-                )
-            else:
-                await callback.answer("Шаги не найдены")
+            try:
+                steps_data = await BACKEND_CLIENT.get_steps_list(token)
+                steps = steps_data.get("steps", [])
+                
+                logger.info(f"Received {len(steps)} steps for user {telegram_id}")
+                
+                if steps:
+                    await callback.answer()  # Answer callback first to stop loading
+                    logger.info(f"Building steps list markup for {len(steps)} steps")
+                    markup = build_steps_list_markup(steps)
+                    logger.info(f"Markup created, attempting to edit message")
+                    
+                    try:
+                        await edit_long_message(
+                            callback,
+                            "🔢 Выбери шаг для работы:",
+                            reply_markup=markup
+                        )
+                        logger.info(f"Successfully edited message with steps list")
+                    except Exception as edit_error:
+                        logger.exception(f"Failed to edit message: {edit_error}")
+                        # Fallback: send new message
+                        await callback.message.answer(
+                            "🔢 Выбери шаг для работы:",
+                            reply_markup=markup
+                        )
+                        logger.info(f"Sent new message as fallback")
+                else:
+                    await callback.answer("Шаги не найдены")
+            except Exception as e:
+                logger.exception(f"Error in steps_select for user {telegram_id}: {e}")
+                await callback.answer("Ошибка получения списка шагов")
             return
         
         if data == "steps_questions":

@@ -199,6 +199,9 @@ def build_steps_navigation_markup() -> InlineKeyboardMarkup:
 
 def build_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
     """Markup for selecting a step (1-12)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     buttons = []
     # Create buttons in rows of 3
     for i in range(0, len(steps), 3):
@@ -206,13 +209,26 @@ def build_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
         for j in range(3):
             if i + j < len(steps):
                 step = steps[i + j]
+                step_id = step.get('id')
+                step_number = step.get('number')
+                
+                # Validate step data
+                if step_id is None:
+                    logger.warning(f"Step {i+j} has no 'id': {step}")
+                    continue
+                if step_number is None:
+                    logger.warning(f"Step {i+j} has no 'number': {step}")
+                    step_number = step_id  # Fallback to ID
+                
                 row.append(InlineKeyboardButton(
-                    text=f"Шаг {step['number']}",
-                    callback_data=f"step_select_{step['id']}"
+                    text=f"Шаг {step_number}",
+                    callback_data=f"step_select_{step_id}"
                 ))
-        buttons.append(row)
+        if row:  # Only add non-empty rows
+            buttons.append(row)
     
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
+    logger.info(f"Built steps list markup with {len(buttons)-1} rows of step buttons")
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def build_step_questions_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:

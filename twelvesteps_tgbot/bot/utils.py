@@ -113,16 +113,41 @@ async def edit_long_message(
         reply_markup: Optional inline keyboard markup
         max_length: Maximum length per chunk
     """
-    chunks = split_long_message(text, max_length)
+    import logging
+    logger = logging.getLogger(__name__)
     
-    if len(chunks) == 1:
-        # Single chunk - can use edit_text
-        await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
-    else:
-        # Multiple chunks - edit first, send others
-        await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
-        for chunk in chunks[1:]:
-            await callback.message.answer(chunk)
+    try:
+        chunks = split_long_message(text, max_length)
+        
+        if len(chunks) == 1:
+            # Single chunk - can use edit_text
+            try:
+                await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
+                logger.info(f"Successfully edited message for callback {callback.data}")
+            except Exception as e:
+                logger.error(f"Failed to edit message: {e}, trying to send new message instead")
+                # If edit fails, try to send new message
+                await callback.message.answer(chunks[0], reply_markup=reply_markup)
+        else:
+            # Multiple chunks - edit first, send others
+            try:
+                await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
+                logger.info(f"Successfully edited first chunk for callback {callback.data}")
+            except Exception as e:
+                logger.error(f"Failed to edit message: {e}, sending all chunks as new messages")
+                # If edit fails, send all as new messages
+                await callback.message.answer(chunks[0], reply_markup=reply_markup)
+            
+            for chunk in chunks[1:]:
+                await callback.message.answer(chunk)
+    except Exception as e:
+        logger.exception(f"Error in edit_long_message for callback {callback.data}: {e}")
+        # Fallback: just send as new message
+        try:
+            await callback.message.answer(text[:max_length], reply_markup=reply_markup)
+        except Exception as e2:
+            logger.exception(f"Failed to send fallback message: {e2}")
+            raise
 
 
 def is_question(text: str) -> bool:
