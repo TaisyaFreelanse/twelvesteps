@@ -1736,30 +1736,79 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             # 1. Dict with "fields" key: {"fields": [{"name": "...", "description": "..."}]}
             # 2. Dict with field keys: {"situation": "Ситуация", "thoughts": "Мысли", ...}
             # 3. Dict with detailed structure: {"situation": {"label": "...", "description": "...", "order": 1}, ...}
+            # 4. Complex author template: {"version": 2, "header": {...}, "situations": {...}, ...}
             if "fields" in structure:
                 fields = structure.get("fields", [])
+            elif "header" in structure or "situations" in structure:
+                # Complex author template format v2
+                # Extract fields from header and situations.item_structure
+                fields = []
+                
+                # Process header fields
+                header = structure.get("header", {})
+                for field_key, field_data in header.items():
+                    if isinstance(field_data, dict) and not field_data.get("auto_fill"):
+                        fields.append({
+                            "key": f"header_{field_key}",
+                            "name": field_data.get("label", field_key),
+                            "description": field_data.get("description", ""),
+                            "type": "header"
+                        })
+                
+                # Process situations item structure
+                situations = structure.get("situations", {})
+                item_structure = situations.get("item_structure", {})
+                if item_structure:
+                    sorted_items = sorted(item_structure.items(), key=lambda x: x[1].get("order", 999) if isinstance(x[1], dict) else 999)
+                    for field_key, field_data in sorted_items:
+                        if isinstance(field_data, dict):
+                            fields.append({
+                                "key": f"situation_{field_key}",
+                                "name": field_data.get("label", field_key),
+                                "description": field_data.get("description", ""),
+                                "example": field_data.get("example", ""),
+                                "type": "situation"
+                            })
+                
+                # Process conclusion
+                conclusion = structure.get("conclusion", {})
+                if isinstance(conclusion, dict) and conclusion.get("label"):
+                    fields.append({
+                        "key": "conclusion",
+                        "name": conclusion.get("label", "Вывод"),
+                        "description": conclusion.get("description", ""),
+                        "type": "conclusion",
+                        "optional": conclusion.get("optional", False)
+                    })
             else:
                 # Convert dict structure to fields list
                 fields = []
                 # Check if structure has detailed format (with label/description) or simple format
-                sample_value = next(iter(structure.values())) if structure else None
-                if isinstance(sample_value, dict) and "label" in sample_value:
-                    # Detailed format: {"situation": {"label": "...", "description": "...", "order": 1}}
-                    sorted_items = sorted(structure.items(), key=lambda x: x[1].get("order", 999))
-                    for field_key, field_data in sorted_items:
+                # Skip non-dict values (like version: 2)
+                dict_values = [(k, v) for k, v in structure.items() if isinstance(v, dict)]
+                if dict_values:
+                    sample_key, sample_value = dict_values[0]
+                    if "label" in sample_value:
+                        # Detailed format: {"situation": {"label": "...", "description": "...", "order": 1}}
+                        sorted_items = sorted(dict_values, key=lambda x: x[1].get("order", 999))
+                        for field_key, field_data in sorted_items:
+                            fields.append({
+                                "key": field_key,
+                                "name": field_data.get("label", field_key),
+                                "description": field_data.get("description", ""),
+                                "min_items": field_data.get("min_items")
+                            })
+                
+                # Also handle simple string values
+                for field_key, field_label in structure.items():
+                    # Skip non-field entries (like min_items, max_items, version, etc.)
+                    if isinstance(field_label, (int, float, bool)):
+                        continue
+                    if isinstance(field_label, str):
                         fields.append({
                             "key": field_key,
-                            "name": field_data.get("label", field_key),
-                            "description": field_data.get("description", ""),
-                            "min_items": field_data.get("min_items")
-                        })
-                else:
-                    # Simple format: {"situation": "Ситуация", "thoughts": "Мысли", ...}
-                    for field_key, field_label in structure.items():
-                        fields.append({
-                            "key": field_key,
-                            "name": field_label if isinstance(field_label, str) else field_label.get("label", field_key),
-                            "description": field_label.get("description", "") if isinstance(field_label, dict) else ""
+                            "name": field_label,
+                            "description": ""
                         })
             
             if not fields:
