@@ -263,6 +263,7 @@ def build_step_actions_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🆘 Нужна помощь", callback_data="sos_help")],
         [InlineKeyboardButton(text="🧩 Заполнить по шаблону", callback_data="step_template")],
+        [InlineKeyboardButton(text="🔢 Выбрать другой шаг", callback_data="steps_select")],
         [
             InlineKeyboardButton(text="⏸ Пауза", callback_data="step_pause"),
             InlineKeyboardButton(text="🔁 Другой вопрос", callback_data="step_switch_question")
