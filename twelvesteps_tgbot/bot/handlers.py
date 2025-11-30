@@ -101,7 +101,6 @@ def register_handlers(dp: Dispatcher) -> None:
     # 3. Step Answering Flow (Only works if state is StepState.answering)
     dp.message(StateFilter(StepState.answering))(handle_step_answer)
     dp.message(StateFilter(StepState.filling_template))(handle_template_field_input)
-    dp.callback_query(F.data.startswith("step_"))(handle_step_action_callback)
     dp.message(Command(commands=["qa_open"]))(qa_open)
     
     # 4. Profile Flow
@@ -118,10 +117,13 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message(StateFilter(SosStates.chatting))(handle_sos_chat_message)
     dp.message(StateFilter(SosStates.custom_input))(handle_sos_custom_input)
     
-    # 4.7. Steps Navigation Flow
+    # 4.7. Steps Navigation Flow (MUST be registered BEFORE general step_ handlers)
     dp.callback_query(F.data.startswith("steps_"))(handle_steps_navigation_callback)
     dp.callback_query(F.data.startswith("step_select_"))(handle_step_selection_callback)
     dp.callback_query(F.data.startswith("question_view_"))(handle_question_view_callback)
+    
+    # 3.5. Step Action Callbacks (exclude step_select_ to avoid conflicts)
+    dp.callback_query(F.data.startswith("step_") & ~F.data.startswith("step_select_"))(handle_step_action_callback)
     
     # 4.8. Steps Settings Flow
     dp.callback_query(F.data.startswith("settings_"))(handle_steps_settings_callback)
