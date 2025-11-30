@@ -466,19 +466,21 @@ async def submit_answer(
     """
     Submits an answer to the currently active question (Tail).
     Supports both plain text and template-structured JSON answers.
+    Validates minimum answer length to prevent accidental skipping.
     """
     service = StepFlowService(current_context.session)
     
-    success = await service.save_user_answer(
+    success, error_message = await service.save_user_answer(
         current_context.user.id, 
         answer_data.text,
-        is_template_format=answer_data.is_template_format
+        is_template_format=answer_data.is_template_format,
+        skip_validation=getattr(answer_data, 'skip_validation', False)
     )
     
     if not success:
         raise HTTPException(
             status_code=400,
-            detail="No active question found to answer. Please call /steps/next first."
+            detail=error_message or "No active question found to answer. Please call /steps/next first."
         )
     
     return {"status": "success", "message": "Answer saved."}

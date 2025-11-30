@@ -83,9 +83,16 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message(Command(commands=["about_step"]))(handle_about_step)
     dp.message(Command(commands=["sos"]))(handle_sos)
     dp.message(Command(commands=["profile"]))(handle_profile)
-    dp.message(Command(commands=["steps_settings"]))(handle_steps_settings)
+    dp.message(Command(commands=["steps_settings", "settings"]))(handle_steps_settings)
     dp.message(Command(commands=["thanks"]))(handle_thanks)
-    dp.message(Command(commands=["day"]))(handle_day)
+    dp.message(Command(commands=["day", "inventory"]))(handle_day)  # Alias for self-analysis
+    
+    # 1.5. Main menu button text handlers (for button clicks)
+    dp.message(F.text == "🪜 Работа по шагу")(handle_steps)
+    dp.message(F.text == "📖 Самоанализ")(handle_day)
+    dp.message(F.text == "🆘 Помощь (SOS)")(handle_sos)
+    dp.message(F.text == "⚙️ Настройки")(handle_steps_settings)
+    dp.message(F.text == "🙏 Благодарность")(handle_thanks)
 
     # 2. Onboarding Flow
     register_onboarding_handlers(dp)
@@ -292,6 +299,7 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
     """
     Processes the user's text as an answer to the active step question.
     Also handles pause draft saving if action is "pause".
+    Validates minimum answer length before saving.
     """
     telegram_id = message.from_user.id
     username = message.from_user.username
@@ -327,6 +335,20 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
             await state.clear()
             return
 
+        # Check if validation error occurred
+        if step_next.get("error"):
+            error_message = step_next.get("message", "Ошибка валидации")
+            await message.answer(
+                f"{error_message}\n\n"
+                "💡 Ты можешь:\n"
+                "• Дополнить ответ и отправить снова\n"
+                "• Нажать «⏸ Пауза» чтобы сохранить черновик\n"
+                "• Нажать «🔀 Вопрос» чтобы перейти к другому вопросу",
+                reply_markup=build_step_actions_markup()
+            )
+            # Stay in answering state
+            return
+
         # Get updated step info for progress indicator
         token = await get_or_fetch_token(telegram_id, username, first_name)
         step_info = await BACKEND_CLIENT.get_current_step_info(token) if token else {}
@@ -343,9 +365,9 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
                 answered_questions=step_info.get("answered_questions", 0),
                 total_questions=step_info.get("total_questions", 0)
             )
-            full_response = f"{progress_indicator}\n\n{response_text}"
+            full_response = f"{progress_indicator}\n\n✅ Ответ сохранён!\n\n{response_text}"
         else:
-            full_response = response_text
+            full_response = f"✅ Ответ сохранён!\n\n{response_text}"
 
         await send_long_message(message, full_response, reply_markup=build_step_actions_markup())
 

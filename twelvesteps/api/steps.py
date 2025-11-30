@@ -13,6 +13,9 @@ from db.models import (
 import json
 
 class StepFlowService:
+    # Минимальное количество символов для ответа на вопрос (защита от случайного пропуска)
+    MIN_ANSWER_LENGTH = 50  # минимум 50 символов
+    
     def __init__(self, session: AsyncSession):
         self.session = session
     
@@ -254,11 +257,54 @@ class StepFlowService:
 
         return next_question.text
 
-    async def save_user_answer(self, user_id: int, answer_text: str, is_template_format: bool = False) -> bool:
+    def validate_answer_length(self, answer_text: str, is_template_format: bool = False) -> tuple[bool, str]:
         """
-        Checks for an open Tail, saves the answer, and closes the Tail.
+        Validates that answer meets minimum length requirement.
+        Returns (is_valid, error_message).
+        
+        According to requirements:
+        "можно поставить на строку ограничение в символах, чтоб нечаянно не получилось пропустить вопрос по ошибке"
+        """
+        if is_template_format:
+            # For template format, check total content length
+            try:
+                template_data = json.loads(answer_text)
+                # Calculate total text length in template
+                total_length = 0
+                for key, value in template_data.items():
+                    if isinstance(value, str):
+                        total_length += len(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, str):
+                                total_length += len(item)
+                            elif isinstance(item, dict):
+                                for v in item.values():
+                                    if isinstance(v, str):
+                                        total_length += len(v)
+                
+                if total_length < self.MIN_ANSWER_LENGTH:
+                    return False, f"⚠️ Ответ слишком короткий ({total_length} символов). Минимум: {self.MIN_ANSWER_LENGTH} символов. Пожалуйста, раскрой ответ подробнее."
+            except json.JSONDecodeError:
+                # If not valid JSON, check plain text length
+                if len(answer_text.strip()) < self.MIN_ANSWER_LENGTH:
+                    return False, f"⚠️ Ответ слишком короткий ({len(answer_text.strip())} символов). Минимум: {self.MIN_ANSWER_LENGTH} символов. Пожалуйста, раскрой ответ подробнее."
+        else:
+            # Plain text answer
+            if len(answer_text.strip()) < self.MIN_ANSWER_LENGTH:
+                return False, f"⚠️ Ответ слишком короткий ({len(answer_text.strip())} символов). Минимум: {self.MIN_ANSWER_LENGTH} символов.\n\nРаскрой ответ подробнее - это поможет глубже проработать вопрос."
+        
+        return True, ""
+    
+    async def save_user_answer(self, user_id: int, answer_text: str, is_template_format: bool = False, skip_validation: bool = False) -> tuple[bool, str]:
+        """
+        Checks for an open Tail, validates answer length, saves the answer, and closes the Tail.
         If is_template_format is True, answer_text should be a JSON string with template structure.
         Otherwise, it's treated as plain text.
+        
+        Returns: (success: bool, error_message: str)
+        - (True, "") on success
+        - (False, error_message) on failure
         """
         # 1. Find the active TAIL
         stmt = select(Tail).where(
@@ -270,14 +316,20 @@ class StepFlowService:
         active_tail = result.scalars().first()
 
         if not active_tail:
-            return False
+            return False, "Нет активного вопроса. Нажми /steps, чтобы начать."
 
-        # 2. Get user and active template
+        # 2. Validate answer length (unless skipped)
+        if not skip_validation:
+            is_valid, error_msg = self.validate_answer_length(answer_text, is_template_format)
+            if not is_valid:
+                return False, error_msg
+
+        # 3. Get user and active template
         stmt_user = select(User).where(User.id == user_id)
         result_user = await self.session.execute(stmt_user)
         user = result_user.scalars().first()
         
-        # 3. Process answer text based on template
+        # 4. Process answer text based on template
         final_answer_text = answer_text
         
         if is_template_format:
@@ -296,7 +348,7 @@ class StepFlowService:
             # This is handled in the bot when user fills by template
             final_answer_text = answer_text
 
-        # 4. Create the Answer record
+        # 5. Create the Answer record
         new_answer = StepAnswer(
             user_id=user_id,
             step_id=active_tail.step_id,
@@ -306,17 +358,17 @@ class StepFlowService:
         )
         self.session.add(new_answer)
 
-        # 5. Close the Tail
+        # 6. Close the Tail
         active_tail.is_closed = True
         active_tail.closed_at = datetime.now()
 
-        # 6. IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
+        # 7. IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
         # This builds a complete picture of the user's character
         # Note: update_personalized_prompt_from_all_answers commits internally
         from services.personalization_service import update_personalized_prompt_from_all_answers
         await update_personalized_prompt_from_all_answers(self.session, user_id)
         
-        return True
+        return True, ""
     
     async def get_current_step_questions(self, user_id: int) -> list[dict]:
         """Get list of questions for current step"""

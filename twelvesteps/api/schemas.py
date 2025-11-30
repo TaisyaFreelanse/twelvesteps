@@ -88,6 +88,7 @@ class OpenStepQuestion(BaseModel):
 class AnswerRequest(BaseModel):
     text: str
     is_template_format: bool = Field(default=False, description="Whether answer is in template JSON format")
+    skip_validation: bool = Field(default=False, description="Skip minimum length validation (for intentional short answers)")
 
 class StepResponse(BaseModel):
     message: str

@@ -86,25 +86,43 @@ class BackendClient:
         """
         return await self._request("GET", "/steps/next", token=access_token)
 
-    async def submit_step_answer(self, access_token: str, text: str, is_template_format: bool = False) -> bool:
+    async def submit_step_answer(
+        self, 
+        access_token: str, 
+        text: str, 
+        is_template_format: bool = False,
+        skip_validation: bool = False
+    ) -> Tuple[bool, Optional[str]]:
         """
         Attempts to submit an answer for the current active step.
-        Returns: True if answer was saved, False if no active question was found (400).
+        Returns: (success: bool, error_message: Optional[str])
+        - (True, None) on success
+        - (False, error_message) if validation failed or no active question
         Raises: aiohttp.ClientResponseError for other errors (500, 401, etc).
         """
-        try:
-            await self._request(
-                "POST", 
-                "/steps/answer", 
-                token=access_token, 
-                json={"text": text, "is_template_format": is_template_format}
-            )
-            return True
-        except aiohttp.ClientResponseError as e:
-            # API returns 400 if there is no active "Tail" (question) to answer
-            if e.status == 400:
-                return False
-            raise e
+        url = f"{self.base_url}/steps/answer"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        payload = {
+            "text": text, 
+            "is_template_format": is_template_format,
+            "skip_validation": skip_validation
+        }
+        
+        async with aiohttp.ClientSession(timeout=self.timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                if response.status == 200:
+                    return True, None
+                elif response.status == 400:
+                    # Get error details from response
+                    try:
+                        error_data = await response.json()
+                        error_message = error_data.get("detail", "Ошибка при сохранении ответа")
+                        return False, error_message
+                    except Exception:
+                        return False, "Нет активного вопроса. Нажми /steps"
+                else:
+                    response.raise_for_status()
+                    return False, "Ошибка сервера"
 
     async def get_current_step_info(self, access_token: str) -> Dict[str, Any]:
         """Get current step information with progress indicators"""
@@ -407,24 +425,36 @@ async def process_step_message(
     telegram_id: int,
     text: str,
     username: Optional[str] = None,
-    first_name: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+    first_name: Optional[str] = None,
+    skip_validation: bool = False
+) -> Dict[str, Any]:
     """
     Logic:
     1. Try to submit the user's text as an answer to an active step.
     2. If successful: Fetch and return the NEXT question/status.
-    3. If failed (was not an answer): Return None (caller should use legacy chat).
+    3. If validation failed: Return error message.
+    4. If no active question: Return None (caller should use legacy chat).
+    
+    Returns:
+    - {"message": ..., "is_completed": ...} on success (next question)
+    - {"error": True, "message": ...} on validation error
+    - None if no active step question
     """
     token = await get_or_fetch_token(telegram_id, username, first_name)
     if not token:
         return None
 
     # 1. Try to submit answer (default is_template_format=False for plain text)
-    was_answer = await BACKEND_CLIENT.submit_step_answer(token, text, is_template_format=False)
+    success, error_message = await BACKEND_CLIENT.submit_step_answer(
+        token, text, is_template_format=False, skip_validation=skip_validation
+    )
 
-    if was_answer:
+    if success:
         # 2. If it was an answer, get the immediate next prompt
         return await BACKEND_CLIENT.get_next_step(token)
+    elif error_message:
+        # Validation failed - return error
+        return {"error": True, "message": error_message}
     
     return None
 

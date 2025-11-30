@@ -28,12 +28,21 @@ PROGRAM_EXPERIENCE_OPTIONS: List[str] = ["Новичок", "Есть немно�
 
 
 def build_main_menu_markup() -> ReplyKeyboardMarkup:
-    """Produce the quick action keyboard shown after onboarding or in main flow."""
+    """
+    Produce the quick action keyboard shown after onboarding or in main flow.
+    
+    According to requirements:
+    - 🪜 Работа по шагу
+    - 📖 Самоанализ (десятый шаг) — отдельная вечерняя инвентаризация
+    - 💬 GPT-чат (свободный) — работает с учетом памяти, блоков, фреймов
+    - ❓ Помощь (SOS) — примеры, поддержка, справка
+    - ⚙️ Настройки — смена шаблона, сброс
+    """
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="/steps"), KeyboardButton(text="/day")],
-            [KeyboardButton(text="/profile"), KeyboardButton(text="/sos")],
-            [KeyboardButton(text="/thanks")],
+            [KeyboardButton(text="🪜 Работа по шагу"), KeyboardButton(text="📖 Самоанализ")],
+            [KeyboardButton(text="🆘 Помощь (SOS)"), KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="🙏 Благодарность")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
