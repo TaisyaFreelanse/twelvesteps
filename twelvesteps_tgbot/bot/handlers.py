@@ -419,7 +419,10 @@ async def handle_reset(message: Message, state: FSMContext) -> None:
         TOKEN_STORE[key] = access_token
         USER_CACHE[key] = user
         
-        if is_new:
+        # Check if user needs onboarding: new user OR existing user without program_experience
+        needs_onboarding = is_new or not user.get("program_experience")
+        
+        if needs_onboarding:
             await state.set_state(OnboardingStates.display_name)
             await message.answer(
                 "🔄 Начинаем заново!\n\nПривет! Как к тебе обращаться?",
@@ -646,7 +649,10 @@ async def handle_start(message: Message, state: FSMContext) -> None:
     TOKEN_STORE[key] = access_token
     USER_CACHE[key] = user
 
-    if is_new:
+    # Check if user needs onboarding: new user OR existing user without program_experience
+    needs_onboarding = is_new or not user.get("program_experience")
+    
+    if needs_onboarding:
         await state.clear()
         await state.set_state(OnboardingStates.display_name)
         await message.answer("Привет! Как к тебе обращаться?", reply_markup=build_exit_markup())
