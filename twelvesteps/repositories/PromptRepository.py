@@ -78,3 +78,83 @@ class PromptRepository:
                 "role": "system",
                 "content": "You are a supportive AA sponsor. Help user analyze their current state when they use /day."
             })
+    
+    @staticmethod
+    async def load_knowledge_base():
+        """
+        Loads the knowledge base with 12 Steps information for SOS context.
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/knowledge_base.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content)
+        except FileNotFoundError:
+            return None
+    
+    @staticmethod
+    async def get_step_knowledge(step_number: int) -> dict:
+        """
+        Get knowledge for a specific step.
+        Returns dict with name, essence, keywords, typical_situations, guiding_areas.
+        """
+        knowledge_base = await PromptRepository.load_knowledge_base()
+        if knowledge_base and "steps" in knowledge_base:
+            step_key = str(step_number)
+            if step_key in knowledge_base["steps"]:
+                return knowledge_base["steps"][step_key]
+        return {
+            "name": f"Шаг {step_number}",
+            "essence": "",
+            "keywords": [],
+            "typical_situations": [],
+            "guiding_areas": []
+        }
+    
+    @staticmethod
+    async def load_sos_memory_prompt():
+        """
+        Loads the specialized SOS prompt for 'memory' help type.
+        DEPRECATED: Use load_sos_direction_prompt instead.
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/sos_memory.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None
+    
+    @staticmethod
+    async def load_sos_direction_prompt():
+        """
+        Loads the SOS prompt for 'direction' help type (Помоги понять куда смотреть).
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/sos_direction.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None
+    
+    @staticmethod
+    async def load_sos_question_prompt():
+        """
+        Loads the SOS prompt for 'question' help type (Не понимаю вопрос).
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/sos_question.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None
+    
+    @staticmethod
+    async def load_sos_support_prompt():
+        """
+        Loads the SOS prompt for 'support' help type (Просто тяжело — нужна поддержка).
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/sos_support.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None

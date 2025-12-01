@@ -166,8 +166,7 @@ def build_sos_help_type_markup() -> InlineKeyboardMarkup:
     """Markup for selecting type of help in SOS."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📌 Не понимаю вопрос", callback_data="sos_help_question")],
-        [InlineKeyboardButton(text="🧱 Не могу вспомнить ситуацию", callback_data="sos_help_memory")],
-        [InlineKeyboardButton(text="🔁 Застрял — не могу сформулировать", callback_data="sos_help_formulation")],
+        [InlineKeyboardButton(text="🧭 Помоги понять куда смотреть", callback_data="sos_help_direction")],
         [InlineKeyboardButton(text="😶 Просто тяжело, нужна поддержка", callback_data="sos_help_support")],
         [InlineKeyboardButton(text="✍️ Своё", callback_data="sos_help_custom")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="sos_cancel")]

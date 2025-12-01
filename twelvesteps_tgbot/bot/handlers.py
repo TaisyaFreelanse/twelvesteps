@@ -811,8 +811,8 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             help_type = data.replace("sos_help_", "")
             help_type_map = {
                 "question": "Не понимаю вопрос",
-                "memory": "Не могу вспомнить ситуацию",
-                "formulation": "Застрял — не могу сформулировать",
+                "direction": "Помоги понять куда смотреть",
+                "memory": "Помоги понять куда смотреть",  # backwards compatibility
                 "support": "Просто тяжело, нужна поддержка"
             }
             help_type_name = help_type_map.get(help_type, help_type)
