@@ -740,6 +740,24 @@ async def handle_sos(message: Message, state: FSMContext) -> None:
     )
 
 
+async def safe_answer_callback(callback: CallbackQuery, text: str | None = None, show_alert: bool = False) -> bool:
+    """
+    Safely answer a callback query, handling expired queries gracefully.
+    Returns True if answered successfully, False if query expired.
+    """
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+        return True
+    except TelegramBadRequest as e:
+        # Check if it's the "query too old" error
+        error_message = str(e).lower()
+        if "query is too old" in error_message or "query id is invalid" in error_message:
+            logger.warning("Callback query expired for user %s: %s", callback.from_user.id, callback.data)
+            return False
+        # Re-raise if it's a different TelegramBadRequest
+        raise
+
+
 async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Handle SOS callback queries (help type selection, exit, etc.)"""
     data = callback.data
@@ -750,7 +768,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
     try:
         token = await get_or_fetch_token(telegram_id, username, first_name)
         if not token:
-            await callback.answer("Ошибка авторизации. Нажми /start.")
+            await safe_answer_callback(callback, "Ошибка авторизации. Нажми /start.")
             return
         
         if data == "sos_cancel":
@@ -763,7 +781,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             )
             # Send main menu as a new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
         if data == "sos_exit":
@@ -776,7 +794,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             )
             # Send main menu as a new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
         if data == "sos_help":
@@ -792,7 +810,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                 "Выбери или опиши словами:",
                 reply_markup=build_sos_help_type_markup()
             )
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
         if data == "sos_help_custom":
@@ -803,7 +821,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                 "✍️ Опиши, с чем нужна помощь, своими словами:",
                 reply_markup=build_sos_exit_markup()
             )
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
         if data.startswith("sos_help_"):
@@ -833,7 +851,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                 f"🆘 Помощь: {help_type_name}\n\n{reply_text}",
                 reply_markup=build_sos_exit_markup()
             )
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
         if data == "sos_save_yes":
@@ -846,7 +864,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             )
             # Send main menu as a new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await callback.answer("Черновик сохранён")
+            await safe_answer_callback(callback, "Черновик сохранён")
             return
         
         if data == "sos_save_no":
@@ -859,14 +877,23 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             )
             # Send main menu as a new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await callback.answer()
+            await safe_answer_callback(callback)
             return
         
-        await callback.answer("Неизвестная команда")
+        await safe_answer_callback(callback, "Неизвестная команда")
         
+    except TelegramBadRequest as e:
+        # Handle Telegram API errors (including expired queries)
+        error_message = str(e).lower()
+        if "query is too old" in error_message or "query id is invalid" in error_message:
+            logger.warning("Callback query expired for user %s: %s", telegram_id, data)
+            # Don't try to answer - query is already expired
+        else:
+            logger.exception("TelegramBadRequest handling SOS callback for %s: %s", telegram_id, e)
+            await safe_answer_callback(callback, "Ошибка. Попробуй позже.")
     except Exception as exc:
         logger.exception("Error handling SOS callback for %s: %s", telegram_id, exc)
-        await callback.answer("Ошибка. Попробуй позже.")
+        await safe_answer_callback(callback, "Ошибка. Попробуй позже.")
 
 
 async def handle_sos_chat_message(message: Message, state: FSMContext) -> None:
