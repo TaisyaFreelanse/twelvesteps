@@ -44,24 +44,54 @@ class TemplateProgressRepository:
         result = await self.session.execute(stmt)
         return result.scalars().first()
     
+    async def get_any_progress(
+        self, user_id: int, step_id: int, question_id: int
+    ) -> Optional[TemplateProgress]:
+        """Получить любой прогресс по шаблону для вопроса (включая COMPLETED и CANCELLED)"""
+        stmt = select(TemplateProgress).where(
+            and_(
+                TemplateProgress.user_id == user_id,
+                TemplateProgress.step_id == step_id,
+                TemplateProgress.question_id == question_id
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+    
     async def get_or_create_progress(
         self, user_id: int, step_id: int, question_id: int
     ) -> TemplateProgress:
         """Получить или создать прогресс по шаблону"""
-        progress = await self.get_active_progress(user_id, step_id, question_id)
+        # Сначала ищем любой существующий прогресс
+        progress = await self.get_any_progress(user_id, step_id, question_id)
         
-        if not progress:
-            progress = TemplateProgress(
-                user_id=user_id,
-                step_id=step_id,
-                question_id=question_id,
-                status=TemplateProgressStatus.IN_PROGRESS,
-                current_situation=1,
-                current_field="where",
-                situations=[]
-            )
-            self.session.add(progress)
-            await self.session.flush()
+        if progress:
+            # Если был CANCELLED или COMPLETED — сбрасываем для нового заполнения
+            if progress.status in [TemplateProgressStatus.CANCELLED, TemplateProgressStatus.COMPLETED]:
+                progress.status = TemplateProgressStatus.IN_PROGRESS
+                progress.current_situation = 1
+                progress.current_field = "where"
+                progress.situations = []
+                progress.conclusion = None
+                progress.paused_at = None
+                progress.completed_at = None
+                progress.updated_at = datetime.utcnow()
+                self.session.add(progress)
+                await self.session.flush()
+            return progress
+        
+        # Создаём новый прогресс
+        progress = TemplateProgress(
+            user_id=user_id,
+            step_id=step_id,
+            question_id=question_id,
+            status=TemplateProgressStatus.IN_PROGRESS,
+            current_situation=1,
+            current_field="where",
+            situations=[]
+        )
+        self.session.add(progress)
+        await self.session.flush()
         
         return progress
     
