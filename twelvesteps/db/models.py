@@ -674,3 +674,63 @@ class TemplateProgress(Base):
     user: Mapped["User"] = relationship()
     step: Mapped["Step"] = relationship()
     question: Mapped["Question"] = relationship()
+
+
+# --- STEP 10 DAILY ANALYSIS ---
+
+class Step10AnalysisStatus(Enum):
+    """Статус ежедневного самоанализа по 10 шагу"""
+    IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+
+
+class Step10DailyAnalysis(Base):
+    """
+    Модель для ежедневного самоанализа по 10 шагу.
+    Пользователь должен ответить на 10 фиксированных вопросов каждый день.
+    
+    Структура:
+    - 10 фиксированных вопросов
+    - Ответы сохраняются в JSON массиве
+    - Система запоминает, на каком вопросе остановился
+    - После завершения всех 10 вопросов - цикл завершается
+    """
+    __tablename__ = "step10_daily_analysis"
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "analysis_date", name="uq_step10_analysis_user_date"),
+    )
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    
+    # Дата самоанализа (для группировки по дням)
+    analysis_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    
+    # Статус прогресса
+    status: Mapped[Step10AnalysisStatus] = mapped_column(
+        SQLEnum(Step10AnalysisStatus, name="step10_analysis_status_enum", create_type=True),
+        default=Step10AnalysisStatus.IN_PROGRESS,
+        server_default=Step10AnalysisStatus.IN_PROGRESS.value,
+    )
+    
+    # Текущий вопрос (1-10)
+    current_question: Mapped[int] = mapped_column(Integer, default=1)
+    
+    # Ответы на вопросы (JSON массив)
+    # Структура: [{"question_number": 1, "answer": "..."}, {"question_number": 2, "answer": "..."}, ...]
+    answers: Mapped[Optional[List[dict]]] = mapped_column(JSON, nullable=True, default=list)
+    
+    # Временные метки
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()

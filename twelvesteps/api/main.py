@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import date
 from fastapi import Depends, FastAPI, HTTPException, APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from dotenv import load_dotenv
@@ -54,6 +55,15 @@ from api.schemas import (
     TemplatePauseResponse,
     TemplateFieldsInfoResponse,
     TemplateFieldInfo,
+    # Step 10 Daily Analysis schemas:
+    Step10StartRequest,
+    Step10StartResponse,
+    Step10SubmitAnswerRequest,
+    Step10SubmitAnswerResponse,
+    Step10PauseRequest,
+    Step10PauseResponse,
+    Step10ProgressResponse,
+    Step10QuestionData,
     # Extended data schemas:
     SessionStateResponse,
     SessionStateUpdateRequest,
@@ -1619,4 +1629,165 @@ async def cancel_template_progress(
     await current_context.session.commit()
     
     return result
+
+
+# --- STEP 10 DAILY ANALYSIS ENDPOINTS ---
+
+from services.step10_service import Step10Service
+
+
+@app.post("/step10/start", response_model=Step10StartResponse)
+async def start_step10_analysis(
+    payload: Step10StartRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> Step10StartResponse:
+    """
+    Начать или продолжить ежедневный самоанализ по 10 шагу.
+    """
+    service = Step10Service(current_context.session)
+    result = await service.start_analysis(
+        user_id=current_context.user.id,
+        analysis_date=payload.analysis_date
+    )
+    await current_context.session.commit()
+    
+    question_data = Step10QuestionData(
+        number=result["question_data"]["number"],
+        text=result["question_data"]["text"],
+        subtext=result["question_data"].get("subtext")
+    )
+    
+    return Step10StartResponse(
+        analysis_id=result["analysis_id"],
+        status=result["status"],
+        current_question=result["current_question"],
+        question_data=question_data,
+        progress_summary=result["progress_summary"],
+        is_resumed=result["is_resumed"],
+        is_complete=result["is_complete"]
+    )
+
+
+@app.post("/step10/submit", response_model=Step10SubmitAnswerResponse)
+async def submit_step10_answer(
+    payload: Step10SubmitAnswerRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> Step10SubmitAnswerResponse:
+    """
+    Сохранить ответ на вопрос самоанализа.
+    """
+    service = Step10Service(current_context.session)
+    result = await service.submit_answer(
+        user_id=current_context.user.id,
+        question_number=payload.question_number,
+        answer=payload.answer,
+        analysis_date=payload.analysis_date
+    )
+    await current_context.session.commit()
+    
+    if not result.get("success"):
+        return Step10SubmitAnswerResponse(
+            success=False,
+            error=result.get("error"),
+            is_complete=False,
+            progress_summary=""
+        )
+    
+    next_question_data = None
+    if result.get("next_question_data"):
+        qd = result["next_question_data"]
+        next_question_data = Step10QuestionData(
+            number=qd["number"],
+            text=qd["text"],
+            subtext=qd.get("subtext")
+        )
+    
+    return Step10SubmitAnswerResponse(
+        success=True,
+        next_question=result.get("next_question"),
+        next_question_data=next_question_data,
+        is_complete=result.get("is_complete", False),
+        progress_summary=result.get("progress_summary", "")
+    )
+
+
+@app.post("/step10/pause", response_model=Step10PauseResponse)
+async def pause_step10_analysis(
+    payload: Step10PauseRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> Step10PauseResponse:
+    """
+    Поставить самоанализ на паузу.
+    """
+    service = Step10Service(current_context.session)
+    result = await service.pause_analysis(
+        user_id=current_context.user.id,
+        analysis_date=payload.analysis_date
+    )
+    await current_context.session.commit()
+    
+    if not result.get("success"):
+        return Step10PauseResponse(
+            success=False,
+            error=result.get("error"),
+            status="",
+            progress_summary="",
+            current_question=0,
+            resume_info=""
+        )
+    
+    question_data = None
+    if result.get("question_data"):
+        qd = result["question_data"]
+        question_data = Step10QuestionData(
+            number=qd["number"],
+            text=qd["text"],
+            subtext=qd.get("subtext")
+        )
+    
+    return Step10PauseResponse(
+        success=True,
+        status=result.get("status", "PAUSED"),
+        progress_summary=result.get("progress_summary", ""),
+        current_question=result.get("current_question", 0),
+        question_data=question_data,
+        resume_info=result.get("resume_info", "")
+    )
+
+
+@app.get("/step10/progress", response_model=Step10ProgressResponse)
+async def get_step10_progress(
+    analysis_date: Optional[date] = None,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> Optional[Step10ProgressResponse]:
+    """
+    Получить текущий прогресс самоанализа.
+    """
+    service = Step10Service(current_context.session)
+    result = await service.get_analysis_progress(
+        user_id=current_context.user.id,
+        analysis_date=analysis_date
+    )
+    
+    if not result:
+        return None
+    
+    question_data = None
+    if result.get("question_data"):
+        qd = result["question_data"]
+        question_data = Step10QuestionData(
+            number=qd["number"],
+            text=qd["text"],
+            subtext=qd.get("subtext")
+        )
+    
+    return Step10ProgressResponse(
+        analysis_id=result["analysis_id"],
+        status=result["status"],
+        current_question=result["current_question"],
+        question_data=question_data,
+        progress_summary=result["progress_summary"],
+        answers=result.get("answers"),
+        is_complete=result.get("is_complete", False)
+    )
 

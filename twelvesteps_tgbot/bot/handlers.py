@@ -72,6 +72,9 @@ class SosStates(StatesGroup):
     custom_input = State()  # User is entering custom help description
     saving_draft = State()  # User is deciding whether to save draft
 
+class Step10States(StatesGroup):
+    answering_question = State()  # User is answering a step10 question
+
 # ---------------------------------------------------------
 # REGISTER HANDLERS
 # ---------------------------------------------------------
@@ -120,6 +123,10 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.callback_query(F.data.startswith("sos_"))(handle_sos_callback)
     dp.message(StateFilter(SosStates.chatting))(handle_sos_chat_message)
     dp.message(StateFilter(SosStates.custom_input))(handle_sos_custom_input)
+    
+    # 4.6.5. Step 10 Daily Analysis Flow
+    dp.message(StateFilter(Step10States.answering_question))(handle_step10_answer)
+    dp.callback_query(F.data.startswith("step10_"))(handle_step10_callback)
     
     # 4.7. Steps Navigation Flow (MUST be registered BEFORE general step_ handlers)
     dp.callback_query(F.data.startswith("steps_"))(handle_steps_navigation_callback)
@@ -1018,10 +1025,12 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 
 async def handle_day(message: Message, state: FSMContext) -> None:
     """
-    Handles /day command: Returns analysis and reflection message.
-    IMPORTANT: Clears step answering state to prevent /day from being treated as step answer.
+    Handles /day command: Starts Step 10 daily self-analysis.
+    IMPORTANT: Closes active step question and switches to Step 10 analysis.
     """
     telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
     
     # CRITICAL: Clear step answering state if active
     # This prevents /day from being processed as a step answer
@@ -1031,23 +1040,189 @@ async def handle_day(message: Message, state: FSMContext) -> None:
         logger.info(f"Cleared step state for user {telegram_id} when switching to /day")
     
     try:
-        backend_reply = await BACKEND_CLIENT.day(telegram_id=telegram_id, debug=False)
+        # Get token for API calls
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("❌ Ошибка аутентификации. Попробуй /start")
+            return
         
-        reply_text = backend_reply.reply
-        if backend_reply.log:
-            log = backend_reply.log
-            log.timestamp = int(datetime.datetime.utcnow().timestamp())
-            USER_LOGS.setdefault(telegram_id, []).append(log)
+        # Start Step 10 analysis
+        data = await BACKEND_CLIENT.start_step10_analysis(token)
         
-        await send_long_message(message, reply_text, reply_markup=build_main_menu_markup())
+        if not data:
+            await message.answer("❌ Не удалось начать самоанализ. Попробуй позже.")
+            return
+        
+        # Check if resumed from pause
+        if data.get("is_resumed"):
+            resume_text = f"⏸ Продолжаем с того места, где остановились.\n\n"
+        else:
+            resume_text = ""
+        
+        # Get question data
+        question_data = data.get("question_data", {})
+        question_number = question_data.get("number", 1)
+        question_text = question_data.get("text", "")
+        question_subtext = question_data.get("subtext", "")
+        
+        # Build question message
+        question_msg = (
+            f"{resume_text}"
+            f"📘 Ежедневный самоанализ (10 шаг)\n\n"
+            f"Вопрос {question_number}/10:\n"
+            f"{question_text}\n"
+        )
+        if question_subtext:
+            question_msg += f"\n{question_subtext}\n"
+        
+        question_msg += f"\n{data.get('progress_summary', '')}"
+        
+        # Set FSM state
+        await state.set_state(Step10States.answering_question)
+        await state.update_data(
+            step10_analysis_id=data.get("analysis_id"),
+            step10_current_question=question_number,
+            step10_is_complete=data.get("is_complete", False)
+        )
+        
+        # Build markup with pause button
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏸ Пауза", callback_data="step10_pause")]
+        ])
+        
+        await send_long_message(message, question_msg, reply_markup=markup)
     
     except Exception as exc:
-        logger.exception("Failed to get response from /day endpoint: %s", exc)
+        logger.exception("Failed to start step10 analysis: %s", exc)
         error_text = (
-            "❌ Не удалось получить ответ от сервера.\n\n"
+            "❌ Не удалось начать самоанализ.\n\n"
             "Произошла ошибка. Хочешь начать заново?"
         )
         await message.answer(error_text, reply_markup=build_error_markup())
+
+
+# ---------------------------------------------------------
+# STEP 10 DAILY ANALYSIS HANDLERS
+# ---------------------------------------------------------
+
+async def handle_step10_answer(message: Message, state: FSMContext) -> None:
+    """Обработка ответа на вопрос самоанализа по 10 шагу"""
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    answer_text = message.text
+    
+    if not answer_text or not answer_text.strip():
+        await message.answer("Пожалуйста, напиши ответ на вопрос.")
+        return
+    
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("❌ Ошибка аутентификации.")
+            await state.clear()
+            return
+        
+        # Get current question from state
+        state_data = await state.get_data()
+        current_question = state_data.get("step10_current_question", 1)
+        
+        # Submit answer
+        data = await BACKEND_CLIENT.submit_step10_answer(
+            token, current_question, answer_text
+        )
+        
+        if not data or not data.get("success"):
+            error_msg = data.get("error", "Не удалось сохранить ответ. Попробуй позже.")
+            await message.answer(f"❌ {error_msg}")
+            return
+        
+        # Check if complete
+        if data.get("is_complete"):
+            # All questions answered
+            await state.clear()
+            completion_msg = (
+                "✅ Самоанализ за сегодня завершён!\n\n"
+                "Спасибо. Самоанализ за сегодня завершён, жду тебя завтра."
+            )
+            await message.answer(completion_msg, reply_markup=build_main_menu_markup())
+            return
+        
+        # Get next question
+        next_question_data = data.get("next_question_data", {})
+        if not next_question_data:
+            await message.answer("❌ Ошибка: не удалось получить следующий вопрос.")
+            await state.clear()
+            return
+        
+        next_question_number = next_question_data.get("number", current_question + 1)
+        next_question_text = next_question_data.get("text", "")
+        next_question_subtext = next_question_data.get("subtext", "")
+        
+        # Update state
+        await state.update_data(
+            step10_current_question=next_question_number
+        )
+        
+        # Build next question message
+        next_question_msg = (
+            f"📘 Ежедневный самоанализ (10 шаг)\n\n"
+            f"Вопрос {next_question_number}/10:\n"
+            f"{next_question_text}\n"
+        )
+        if next_question_subtext:
+            next_question_msg += f"\n{next_question_subtext}\n"
+        
+        next_question_msg += f"\n{data.get('progress_summary', '')}"
+        
+        # Build markup
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏸ Пауза", callback_data="step10_pause")]
+        ])
+        
+        await send_long_message(message, next_question_msg, reply_markup=markup)
+    
+    except Exception as exc:
+        logger.exception("Failed to submit step10 answer: %s", exc)
+        await message.answer("❌ Произошла ошибка. Попробуй позже.")
+
+
+async def handle_step10_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Обработка callback для Step 10 (пауза и т.д.)"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    try:
+        await callback.answer()
+        
+        if data == "step10_pause":
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if not token:
+                await callback.message.answer("❌ Ошибка аутентификации.")
+                return
+            
+            pause_data = await BACKEND_CLIENT.pause_step10_analysis(token)
+            
+            if not pause_data or not pause_data.get("success"):
+                error_msg = pause_data.get("error", "Не удалось поставить на паузу.")
+                await callback.message.answer(f"❌ {error_msg}")
+                return
+            
+            # Clear state
+            await state.clear()
+            
+            pause_msg = (
+                f"⏸ Самоанализ поставлен на паузу.\n\n"
+                f"{pause_data.get('resume_info', '')}\n\n"
+                f"При следующем входе в раздел «📖 Самоанализ» сможешь продолжить с того же места."
+            )
+            await callback.message.answer(pause_msg, reply_markup=build_main_menu_markup())
+    
+    except Exception as exc:
+        logger.exception("Failed to handle step10 callback: %s", exc)
+        await callback.message.answer("❌ Произошла ошибка. Попробуй позже.")
 
 
 # ---------------------------------------------------------

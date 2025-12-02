@@ -405,6 +405,75 @@ class TemplateFieldsInfoResponse(BaseModel):
     min_situations: int
 
 
+# --- STEP 10 DAILY ANALYSIS SCHEMAS ---
+
+class Step10QuestionData(BaseModel):
+    """Данные вопроса для самоанализа"""
+    number: int
+    text: str
+    subtext: Optional[str] = None
+
+
+class Step10StartRequest(BaseModel):
+    """Запрос на начало самоанализа"""
+    analysis_date: Optional[date] = None  # Если не указана, используется сегодняшняя дата
+
+
+class Step10StartResponse(BaseModel):
+    """Ответ при начале самоанализа"""
+    analysis_id: int
+    status: str  # IN_PROGRESS, PAUSED, COMPLETED
+    current_question: int  # 1-10
+    question_data: Step10QuestionData
+    progress_summary: str
+    is_resumed: bool
+    is_complete: bool
+
+
+class Step10SubmitAnswerRequest(BaseModel):
+    """Запрос на сохранение ответа"""
+    question_number: int  # 1-10
+    answer: str
+    analysis_date: Optional[date] = None
+
+
+class Step10SubmitAnswerResponse(BaseModel):
+    """Ответ при сохранении ответа"""
+    success: bool
+    error: Optional[str] = None
+    next_question: Optional[int] = None  # 1-10 или None если завершено
+    next_question_data: Optional[Step10QuestionData] = None
+    is_complete: bool
+    progress_summary: str
+
+
+class Step10PauseRequest(BaseModel):
+    """Запрос на паузу"""
+    analysis_date: Optional[date] = None
+
+
+class Step10PauseResponse(BaseModel):
+    """Ответ при паузе"""
+    success: bool
+    error: Optional[str] = None
+    status: str
+    progress_summary: str
+    current_question: int
+    question_data: Optional[Step10QuestionData] = None
+    resume_info: str
+
+
+class Step10ProgressResponse(BaseModel):
+    """Текущий прогресс самоанализа"""
+    analysis_id: int
+    status: str
+    current_question: int
+    question_data: Optional[Step10QuestionData] = None
+    progress_summary: str
+    answers: Optional[List[Dict[str, Any]]] = None
+    is_complete: bool
+
+
 # --- Extended Data Schemas ---
 
 # SessionState schemas

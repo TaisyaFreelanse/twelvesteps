@@ -356,6 +356,93 @@ class BackendClient:
         return ChatResponse(reply=reply, log=log)
     
     # ================================================================
+    # STEP 10 DAILY ANALYSIS METHODS
+    # ================================================================
+    
+    async def start_step10_analysis(
+        self, token: str, analysis_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Начать или продолжить самоанализ по 10 шагу"""
+        try:
+            payload = {}
+            if analysis_date:
+                payload["analysis_date"] = analysis_date
+            
+            data = await self._request(
+                "POST",
+                "/step10/start",
+                token=token,
+                json=payload
+            )
+            return data
+        except Exception as e:
+            logger.error(f"Failed to start step10 analysis: {e}")
+            return None
+    
+    async def submit_step10_answer(
+        self, token: str, question_number: int, answer: str, analysis_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Сохранить ответ на вопрос самоанализа"""
+        try:
+            payload = {
+                "question_number": question_number,
+                "answer": answer
+            }
+            if analysis_date:
+                payload["analysis_date"] = analysis_date
+            
+            data = await self._request(
+                "POST",
+                "/step10/submit",
+                token=token,
+                json=payload
+            )
+            return data
+        except Exception as e:
+            logger.error(f"Failed to submit step10 answer: {e}")
+            return None
+    
+    async def pause_step10_analysis(
+        self, token: str, analysis_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Поставить самоанализ на паузу"""
+        try:
+            payload = {}
+            if analysis_date:
+                payload["analysis_date"] = analysis_date
+            
+            data = await self._request(
+                "POST",
+                "/step10/pause",
+                token=token,
+                json=payload
+            )
+            return data
+        except Exception as e:
+            logger.error(f"Failed to pause step10 analysis: {e}")
+            return None
+    
+    async def get_step10_progress(
+        self, token: str, analysis_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Получить текущий прогресс самоанализа"""
+        try:
+            params = {}
+            if analysis_date:
+                params["analysis_date"] = analysis_date
+            
+            data = await self._request(
+                "GET",
+                "/step10/progress",
+                token=token,
+                params=params
+            )
+            return data
+        except Exception as e:
+            logger.error(f"Failed to get step10 progress: {e}")
+            return None
+    
+    # ================================================================
     # TEMPLATE PROGRESS METHODS (FSM для пошагового заполнения)
     # ================================================================
     
