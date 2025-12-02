@@ -589,3 +589,88 @@ class ProfileAnswer(Base):
     # Relationships
     user: Mapped["User"] = relationship()
     question: Mapped["ProfileQuestion"] = relationship(back_populates="answers")
+
+
+# --- TEMPLATE PROGRESS ---
+
+class TemplateProgressStatus(Enum):
+    """Статус прогресса по шаблону"""
+    IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+
+
+class TemplateProgress(Base):
+    """
+    Модель для отслеживания прогресса заполнения шаблона ответа.
+    Хранит состояние FSM: текущая ситуация, текущее поле, заполненные данные.
+    
+    Структура шаблона:
+    - 3 ситуации (каждая с 6 полями)
+    - Финальный вывод
+    
+    Поля каждой ситуации:
+    1. where - Где это произошло?
+    2. thoughts - Что ты думал?
+    3. feelings_before - Чувства (до) - минимум 3
+    4. actions - Что ты сделал?
+    5. healthy_feelings - Чувства от здоровой части
+    6. next_step - Пути выхода / Следующий шаг
+    """
+    __tablename__ = "template_progress"
+    
+    __table_args__ = (
+        UniqueConstraint("user_id", "step_id", "question_id", name="uq_template_progress_user_step_question"),
+    )
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    step_id: Mapped[int] = mapped_column(ForeignKey("steps.id", ondelete="CASCADE"), index=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("step_questions.id", ondelete="CASCADE"), index=True)
+    
+    # Статус прогресса
+    status: Mapped[TemplateProgressStatus] = mapped_column(
+        SQLEnum(TemplateProgressStatus, name="template_progress_status_enum", create_type=True),
+        default=TemplateProgressStatus.IN_PROGRESS,
+        server_default=TemplateProgressStatus.IN_PROGRESS.value,
+    )
+    
+    # Текущая позиция в шаблоне
+    current_situation: Mapped[int] = mapped_column(Integer, default=1)  # 1, 2, или 3
+    current_field: Mapped[str] = mapped_column(String(50), default="where")  # where, thoughts, feelings_before, actions, healthy_feelings, next_step, conclusion
+    
+    # Данные заполненных ситуаций (JSON)
+    situations: Mapped[Optional[List[dict]]] = mapped_column(JSON, nullable=True)
+    # Пример структуры situations:
+    # [
+    #   {
+    #     "where": "...",
+    #     "thoughts": "...", 
+    #     "feelings_before": ["тревога", "страх", "раздражение"],
+    #     "actions": "...",
+    #     "healthy_feelings": "...",
+    #     "next_step": "...",
+    #     "complete": true
+    #   },
+    #   {...},
+    #   {...}
+    # ]
+    
+    # Финальный вывод
+    conclusion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Временные метки
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
+    step: Mapped["Step"] = relationship()
+    question: Mapped["Question"] = relationship()

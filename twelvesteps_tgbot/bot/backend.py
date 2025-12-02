@@ -354,6 +354,119 @@ class BackendClient:
                 pass
         
         return ChatResponse(reply=reply, log=log)
+    
+    # ================================================================
+    # TEMPLATE PROGRESS METHODS (FSM для пошагового заполнения)
+    # ================================================================
+    
+    async def start_template_progress(
+        self, token: str, step_id: int, question_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Начать или продолжить заполнение шаблона.
+        Returns dict with progress info.
+        """
+        try:
+            data = await self._request(
+                "POST",
+                "/template-progress/start",
+                token=token,
+                json={"step_id": step_id, "question_id": question_id}
+            )
+            return data
+        except Exception as exc:
+            logger.exception("Failed to start template progress: %s", exc)
+            return None
+    
+    async def submit_template_field(
+        self, token: str, step_id: int, question_id: int, value: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Сохранить значение поля шаблона и получить следующее.
+        Returns dict with next field info.
+        """
+        try:
+            data = await self._request(
+                "POST",
+                "/template-progress/submit",
+                token=token,
+                json={"step_id": step_id, "question_id": question_id, "value": value}
+            )
+            return data
+        except Exception as exc:
+            logger.exception("Failed to submit template field: %s", exc)
+            return None
+    
+    async def pause_template_progress(
+        self, token: str, step_id: int, question_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Поставить заполнение шаблона на паузу.
+        """
+        try:
+            data = await self._request(
+                "POST",
+                "/template-progress/pause",
+                token=token,
+                json={"step_id": step_id, "question_id": question_id}
+            )
+            return data
+        except Exception as exc:
+            logger.exception("Failed to pause template progress: %s", exc)
+            return None
+    
+    async def get_template_progress(
+        self, token: str, step_id: int, question_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Получить текущий прогресс заполнения шаблона.
+        """
+        try:
+            data = await self._request(
+                "GET",
+                f"/template-progress/current?step_id={step_id}&question_id={question_id}",
+                token=token
+            )
+            return data
+        except aiohttp.ClientResponseError as e:
+            if e.status == 404:
+                return None
+            raise
+        except Exception as exc:
+            logger.exception("Failed to get template progress: %s", exc)
+            return None
+    
+    async def cancel_template_progress(
+        self, token: str, step_id: int, question_id: int
+    ) -> bool:
+        """
+        Отменить заполнение шаблона.
+        """
+        try:
+            await self._request(
+                "DELETE",
+                f"/template-progress/cancel?step_id={step_id}&question_id={question_id}",
+                token=token
+            )
+            return True
+        except Exception as exc:
+            logger.exception("Failed to cancel template progress: %s", exc)
+            return False
+    
+    async def get_template_fields_info(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Получить информацию о полях шаблона.
+        """
+        try:
+            data = await self._request(
+                "GET",
+                "/template-progress/fields-info",
+                token=token
+            )
+            return data
+        except Exception as exc:
+            logger.exception("Failed to get template fields info: %s", exc)
+            return None
 
 
 # ---------------------------------------------------------------------------

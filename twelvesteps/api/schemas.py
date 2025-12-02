@@ -328,6 +328,83 @@ class ActiveTemplateRequest(BaseModel):
     template_id: Optional[int] = None  # None to reset to default
 
 
+# --- Template Progress Schemas (FSM для пошагового заполнения) ---
+
+class TemplateProgressStartRequest(BaseModel):
+    """Запрос на начало/продолжение заполнения шаблона"""
+    step_id: int
+    question_id: int
+
+
+class TemplateFieldInfo(BaseModel):
+    """Информация о поле шаблона"""
+    key: str
+    name: str
+    description: Optional[str] = None
+    min_items: Optional[int] = None
+    situation_number: Optional[int] = None
+    is_conclusion: bool = False
+    is_complete: bool = False
+
+
+class TemplateProgressResponse(BaseModel):
+    """Ответ с информацией о прогрессе шаблона"""
+    progress_id: Optional[int] = None
+    status: str  # IN_PROGRESS, PAUSED, COMPLETED, CANCELLED
+    current_field: Optional[str] = None
+    current_situation: Optional[int] = None
+    field_info: Optional[TemplateFieldInfo] = None
+    progress_summary: Optional[str] = None
+    is_resumed: bool = False
+    is_complete: bool = False
+    situations: Optional[List[Dict[str, Any]]] = None
+    conclusion: Optional[str] = None
+
+
+class TemplateFieldSubmitRequest(BaseModel):
+    """Запрос на сохранение значения поля"""
+    step_id: int
+    question_id: int
+    value: str
+
+
+class TemplateFieldSubmitResponse(BaseModel):
+    """Ответ после сохранения поля"""
+    success: bool
+    error: Optional[str] = None
+    validation_error: bool = False
+    next_field: Optional[str] = None
+    field_info: Optional[TemplateFieldInfo] = None
+    current_situation: Optional[int] = None
+    is_situation_complete: bool = False
+    is_all_situations_complete: bool = False
+    ready_for_conclusion: bool = False
+    is_complete: bool = False
+    progress_summary: Optional[str] = None
+    formatted_answer: Optional[str] = None  # Только если is_complete
+
+
+class TemplatePauseRequest(BaseModel):
+    """Запрос на паузу заполнения шаблона"""
+    step_id: int
+    question_id: int
+
+
+class TemplatePauseResponse(BaseModel):
+    """Ответ на паузу"""
+    success: bool
+    error: Optional[str] = None
+    status: Optional[str] = None
+    progress_summary: Optional[str] = None
+    resume_info: Optional[str] = None
+
+
+class TemplateFieldsInfoResponse(BaseModel):
+    """Информация о всех полях шаблона"""
+    fields: List[Dict[str, Any]]
+    min_situations: int
+
+
 # --- Extended Data Schemas ---
 
 # SessionState schemas

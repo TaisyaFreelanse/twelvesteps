@@ -45,6 +45,15 @@ from api.schemas import (
     AnswerTemplateCreateRequest,
     AnswerTemplateUpdateRequest,
     ActiveTemplateRequest,
+    # Template Progress schemas (FSM):
+    TemplateProgressStartRequest,
+    TemplateProgressResponse,
+    TemplateFieldSubmitRequest,
+    TemplateFieldSubmitResponse,
+    TemplatePauseRequest,
+    TemplatePauseResponse,
+    TemplateFieldsInfoResponse,
+    TemplateFieldInfo,
     # Extended data schemas:
     SessionStateResponse,
     SessionStateUpdateRequest,
@@ -1434,4 +1443,180 @@ async def update_user_meta(
         created_at=meta.created_at,
         updated_at=meta.updated_at
     )
+
+
+# ============================================================
+# TEMPLATE PROGRESS ENDPOINTS (FSM для пошагового заполнения)
+# ============================================================
+
+@app.post("/template-progress/start", response_model=TemplateProgressResponse)
+async def start_template_progress(
+    payload: TemplateProgressStartRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TemplateProgressResponse:
+    """
+    Начать или продолжить заполнение шаблона для вопроса.
+    Если есть незавершённый прогресс — возвращает его состояние.
+    Если прогресс на паузе — возобновляет его.
+    """
+    service = TemplateService(current_context.session)
+    result = await service.start_template_filling(
+        user_id=current_context.user.id,
+        step_id=payload.step_id,
+        question_id=payload.question_id
+    )
+    await current_context.session.commit()
+    
+    field_info = None
+    if result.get("field_info"):
+        field_info = TemplateFieldInfo(**result["field_info"])
+    
+    return TemplateProgressResponse(
+        progress_id=result.get("progress_id"),
+        status=result.get("status", "IN_PROGRESS"),
+        current_field=result.get("current_field"),
+        current_situation=result.get("current_situation"),
+        field_info=field_info,
+        progress_summary=result.get("progress_summary"),
+        is_resumed=result.get("is_resumed", False),
+        is_complete=result.get("is_complete", False)
+    )
+
+
+@app.post("/template-progress/submit", response_model=TemplateFieldSubmitResponse)
+async def submit_template_field(
+    payload: TemplateFieldSubmitRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TemplateFieldSubmitResponse:
+    """
+    Сохранить значение текущего поля шаблона и получить следующее.
+    Валидирует ввод (например, минимум 3 чувства для feelings_before).
+    """
+    service = TemplateService(current_context.session)
+    result = await service.submit_field_value(
+        user_id=current_context.user.id,
+        step_id=payload.step_id,
+        question_id=payload.question_id,
+        value=payload.value
+    )
+    await current_context.session.commit()
+    
+    field_info = None
+    if result.get("field_info"):
+        field_info = TemplateFieldInfo(**result["field_info"])
+    
+    return TemplateFieldSubmitResponse(
+        success=result.get("success", False),
+        error=result.get("error"),
+        validation_error=result.get("validation_error", False),
+        next_field=result.get("next_field"),
+        field_info=field_info,
+        current_situation=result.get("current_situation"),
+        is_situation_complete=result.get("is_situation_complete", False),
+        is_all_situations_complete=result.get("is_all_situations_complete", False),
+        ready_for_conclusion=result.get("ready_for_conclusion", False),
+        is_complete=result.get("is_complete", False),
+        progress_summary=result.get("progress_summary"),
+        formatted_answer=result.get("formatted_answer")
+    )
+
+
+@app.post("/template-progress/pause", response_model=TemplatePauseResponse)
+async def pause_template_progress(
+    payload: TemplatePauseRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TemplatePauseResponse:
+    """
+    Поставить заполнение шаблона на паузу.
+    Сохраняет текущий прогресс, можно вернуться позже.
+    """
+    service = TemplateService(current_context.session)
+    result = await service.pause_template_filling(
+        user_id=current_context.user.id,
+        step_id=payload.step_id,
+        question_id=payload.question_id
+    )
+    await current_context.session.commit()
+    
+    return TemplatePauseResponse(
+        success=result.get("success", False),
+        error=result.get("error"),
+        status=result.get("status"),
+        progress_summary=result.get("progress_summary"),
+        resume_info=result.get("resume_info")
+    )
+
+
+@app.get("/template-progress/current", response_model=TemplateProgressResponse)
+async def get_current_template_progress(
+    step_id: int,
+    question_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TemplateProgressResponse:
+    """
+    Получить текущий прогресс заполнения шаблона для вопроса.
+    Возвращает 404, если прогресс не найден.
+    """
+    service = TemplateService(current_context.session)
+    result = await service.get_template_progress(
+        user_id=current_context.user.id,
+        step_id=step_id,
+        question_id=question_id
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Template progress not found")
+    
+    field_info = None
+    if result.get("field_info"):
+        field_info = TemplateFieldInfo(**result["field_info"])
+    
+    return TemplateProgressResponse(
+        progress_id=result.get("progress_id"),
+        status=result.get("status", "IN_PROGRESS"),
+        current_field=result.get("current_field"),
+        current_situation=result.get("current_situation"),
+        field_info=field_info,
+        progress_summary=result.get("progress_summary"),
+        is_complete=result.get("is_complete", False),
+        situations=result.get("situations"),
+        conclusion=result.get("conclusion")
+    )
+
+
+@app.get("/template-progress/fields-info", response_model=TemplateFieldsInfoResponse)
+async def get_template_fields_info(
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> TemplateFieldsInfoResponse:
+    """
+    Получить информацию о всех полях шаблона.
+    Возвращает список полей и минимальное количество ситуаций.
+    """
+    service = TemplateService(current_context.session)
+    
+    return TemplateFieldsInfoResponse(
+        fields=service.get_template_fields_info(),
+        min_situations=service.get_min_situations()
+    )
+
+
+@app.delete("/template-progress/cancel")
+async def cancel_template_progress(
+    step_id: int,
+    question_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> dict:
+    """
+    Отменить заполнение шаблона.
+    Удаляет текущий прогресс без сохранения.
+    """
+    service = TemplateService(current_context.session)
+    result = await service.cancel_template_filling(
+        user_id=current_context.user.id,
+        step_id=step_id,
+        question_id=question_id
+    )
+    await current_context.session.commit()
+    
+    return result
 

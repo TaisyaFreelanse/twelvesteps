@@ -290,6 +290,30 @@ def build_step_actions_markup() -> InlineKeyboardMarkup:
     ])
 
 
+def build_template_filling_markup() -> InlineKeyboardMarkup:
+    """Markup for template filling mode - pause and cancel options."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏸ Пауза (сохранить прогресс)", callback_data="tpl_pause")],
+        [InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="tpl_cancel")]
+    ])
+
+
+def build_template_situation_complete_markup() -> InlineKeyboardMarkup:
+    """Markup shown when a situation is complete."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Продолжить к следующей ситуации", callback_data="tpl_next_situation")],
+        [InlineKeyboardButton(text="⏸ Пауза", callback_data="tpl_pause")]
+    ])
+
+
+def build_template_conclusion_markup() -> InlineKeyboardMarkup:
+    """Markup shown before conclusion (after 3 situations)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Написать финальный вывод", callback_data="tpl_write_conclusion")],
+        [InlineKeyboardButton(text="⏸ Пауза", callback_data="tpl_pause")]
+    ])
+
+
 # --- Steps Settings Keyboards ---
 
 def build_steps_settings_markup() -> InlineKeyboardMarkup:

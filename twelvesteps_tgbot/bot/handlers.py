@@ -34,6 +34,7 @@ from bot.config import (
     build_profile_actions_markup,
     build_profile_skip_markup,
     build_template_selection_markup,
+    build_template_filling_markup,
     build_sos_help_type_markup,
     build_sos_save_draft_markup,
     build_sos_exit_markup,
@@ -111,6 +112,9 @@ def register_handlers(dp: Dispatcher) -> None:
     
     # 4.5. Template Selection Flow
     dp.callback_query(F.data.startswith("template_"))(handle_template_selection)
+    
+    # 4.5.1 Template Filling FSM Flow (tpl_ prefix)
+    dp.callback_query(F.data.startswith("tpl_"))(handle_template_filling_callback)
     
     # 4.6. SOS Help Flow
     dp.callback_query(F.data.startswith("sos_"))(handle_sos_callback)
@@ -1486,6 +1490,80 @@ async def handle_template_selection(callback: CallbackQuery, state: FSMContext) 
 
 
 # ---------------------------------------------------------
+# TEMPLATE FILLING FSM CALLBACKS (tpl_ prefix)
+# ---------------------------------------------------------
+
+async def handle_template_filling_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle template filling FSM callbacks (pause, cancel, etc.)"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await callback.answer("Ошибка авторизации. Нажми /start.")
+            return
+        
+        state_data = await state.get_data()
+        step_id = state_data.get("template_step_id")
+        question_id = state_data.get("template_question_id")
+        
+        if data == "tpl_pause":
+            # Pause template filling
+            if step_id and question_id:
+                result = await BACKEND_CLIENT.pause_template_progress(token, step_id, question_id)
+                
+                if result and result.get("success"):
+                    resume_info = result.get("resume_info", "")
+                    await edit_long_message(
+                        callback,
+                        f"⏸ Прогресс сохранён!\n\n"
+                        f"{resume_info}\n\n"
+                        f"Можешь вернуться позже и продолжить с этого места.\n"
+                        f"Для продолжения нажми «🧩 Заполнить по шаблону»",
+                        reply_markup=build_step_actions_markup()
+                    )
+                    await state.set_state(StepState.answering)
+                    await callback.answer("Прогресс сохранён")
+                else:
+                    await callback.answer("Ошибка сохранения прогресса")
+            else:
+                await callback.answer("Данные шаблона потеряны")
+                await state.set_state(StepState.answering)
+                
+        elif data == "tpl_cancel":
+            # Cancel template filling
+            if step_id and question_id:
+                await BACKEND_CLIENT.cancel_template_progress(token, step_id, question_id)
+            
+            await edit_long_message(
+                callback,
+                "❌ Заполнение шаблона отменено.\n\n"
+                "Ты можешь ответить на вопрос своими словами или начать заполнение заново.",
+                reply_markup=build_step_actions_markup()
+            )
+            await state.set_state(StepState.answering)
+            await callback.answer("Заполнение отменено")
+            
+        elif data == "tpl_next_situation":
+            # Continue to next situation (just acknowledge, actual progression is handled by field input)
+            await callback.answer("Продолжаем...")
+            
+        elif data == "tpl_write_conclusion":
+            # Ready to write conclusion (just acknowledge)
+            await callback.answer("Напиши финальный вывод")
+            
+        else:
+            await callback.answer("Неизвестная команда")
+            
+    except Exception as exc:
+        logger.exception("Error handling template filling callback for %s: %s", telegram_id, exc)
+        await callback.answer("Ошибка. Попробуй позже.")
+
+
+# ---------------------------------------------------------
 # STEPS SETTINGS HANDLERS
 # ---------------------------------------------------------
 
@@ -1737,139 +1815,90 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             await callback.answer("Напиши текст для черновика и отправь его")
             
         elif data == "step_template":
-            # Start template filling mode
-            # Get active template
-            templates_data = await BACKEND_CLIENT.get_templates(token)
-            active_template_id = templates_data.get("active_template_id")
-            
-            if not active_template_id:
-                await callback.answer("Сначала выбери шаблон в настройках")
+            # Start FSM template filling mode using backend API
+            # Get current step info to get step_id and question_id
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
                 return
             
-            # Find active template
-            templates = templates_data.get("templates", [])
-            active_template = None
-            for template in templates:
-                if template.get("id") == active_template_id:
-                    active_template = template
+            step_id = step_info.get("step_id")
+            
+            # Get current question (from active tail)
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if not step_data:
+                await callback.answer("Нет активного вопроса")
+                return
+            
+            # We need question_id from the active tail
+            # For now, let's get it from the backend
+            questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
+            questions = questions_data.get("questions", []) if questions_data else []
+            
+            # Find current question by matching text
+            current_question_text = step_data.get("message", "")
+            question_id = None
+            for q in questions:
+                if q.get("text") == current_question_text:
+                    question_id = q.get("id")
                     break
             
-            if not active_template:
-                await callback.answer("Шаблон не найден")
+            if not question_id and questions:
+                # Fallback: use first unanswered or first question
+                question_id = questions[0].get("id")
+            
+            if not step_id or not question_id:
+                await callback.answer("Не удалось определить вопрос")
                 return
             
-            # Get template structure
-            structure = active_template.get("structure", {})
+            # Start template progress via backend API
+            progress = await BACKEND_CLIENT.start_template_progress(token, step_id, question_id)
             
-            # Convert structure dict to fields list if needed
-            # Structure can be either:
-            # 1. Dict with "fields" key: {"fields": [{"name": "...", "description": "..."}]}
-            # 2. Dict with field keys: {"situation": "Ситуация", "thoughts": "Мысли", ...}
-            # 3. Dict with detailed structure: {"situation": {"label": "...", "description": "...", "order": 1}, ...}
-            # 4. Complex author template: {"version": 2, "header": {...}, "situations": {...}, ...}
-            if "fields" in structure:
-                fields = structure.get("fields", [])
-            elif "header" in structure or "situations" in structure:
-                # Complex author template format v2
-                # Extract fields from header and situations.item_structure
-                fields = []
-                
-                # Process header fields
-                header = structure.get("header", {})
-                for field_key, field_data in header.items():
-                    if isinstance(field_data, dict) and not field_data.get("auto_fill"):
-                        fields.append({
-                            "key": f"header_{field_key}",
-                            "name": field_data.get("label", field_key),
-                            "description": field_data.get("description", ""),
-                            "type": "header"
-                        })
-                
-                # Process situations item structure
-                situations = structure.get("situations", {})
-                item_structure = situations.get("item_structure", {})
-                if item_structure:
-                    sorted_items = sorted(item_structure.items(), key=lambda x: x[1].get("order", 999) if isinstance(x[1], dict) else 999)
-                    for field_key, field_data in sorted_items:
-                        if isinstance(field_data, dict):
-                            fields.append({
-                                "key": f"situation_{field_key}",
-                                "name": field_data.get("label", field_key),
-                                "description": field_data.get("description", ""),
-                                "example": field_data.get("example", ""),
-                                "type": "situation"
-                            })
-                
-                # Process conclusion
-                conclusion = structure.get("conclusion", {})
-                if isinstance(conclusion, dict) and conclusion.get("label"):
-                    fields.append({
-                        "key": "conclusion",
-                        "name": conclusion.get("label", "Вывод"),
-                        "description": conclusion.get("description", ""),
-                        "type": "conclusion",
-                        "optional": conclusion.get("optional", False)
-                    })
-            else:
-                # Convert dict structure to fields list
-                fields = []
-                # Check if structure has detailed format (with label/description) or simple format
-                # Skip non-dict values (like version: 2)
-                dict_values = [(k, v) for k, v in structure.items() if isinstance(v, dict)]
-                if dict_values:
-                    sample_key, sample_value = dict_values[0]
-                    if "label" in sample_value:
-                        # Detailed format: {"situation": {"label": "...", "description": "...", "order": 1}}
-                        sorted_items = sorted(dict_values, key=lambda x: x[1].get("order", 999))
-                        for field_key, field_data in sorted_items:
-                            fields.append({
-                                "key": field_key,
-                                "name": field_data.get("label", field_key),
-                                "description": field_data.get("description", ""),
-                                "min_items": field_data.get("min_items")
-                            })
-                
-                # Also handle simple string values
-                for field_key, field_label in structure.items():
-                    # Skip non-field entries (like min_items, max_items, version, etc.)
-                    if isinstance(field_label, (int, float, bool)):
-                        continue
-                    if isinstance(field_label, str):
-                        fields.append({
-                            "key": field_key,
-                            "name": field_label,
-                            "description": ""
-                        })
-            
-            if not fields:
-                await callback.answer("В шаблоне нет полей")
+            if not progress:
+                await callback.answer("Ошибка при запуске шаблона")
                 return
             
-            # Store template info in state
+            # Store step_id and question_id in state for subsequent field submissions
             await state.update_data(
-                template_id=active_template_id,
-                template_fields=fields,
-                current_field_index=0,
-                template_values={}
+                template_step_id=step_id,
+                template_question_id=question_id
             )
             
-            # Show first field
-            first_field = fields[0]
-            # Support both formats: {"name": "..."} or {"key": "...", "name": "..."}
-            field_key = first_field.get("key") or first_field.get("name", "field_0")
-            field_name = first_field.get("name", field_key)
-            field_description = first_field.get("description", "")
+            # Check if resuming from pause
+            is_resumed = progress.get("is_resumed", False)
+            field_info = progress.get("field_info", {})
+            current_situation = progress.get("current_situation", 1)
+            progress_summary = progress.get("progress_summary", "")
             
-            field_text = f"📋 Заполнение по шаблону\n\n"
+            # Build intro message
+            if is_resumed:
+                intro_text = (
+                    f"📋 Продолжаем заполнение шаблона!\n\n"
+                    f"📊 {progress_summary}\n\n"
+                )
+            else:
+                intro_text = (
+                    f"📋 Заполнение по шаблону\n\n"
+                    f"Шаблон включает:\n"
+                    f"• 3 ситуации (по 6 полей каждая)\n"
+                    f"• Финальный вывод\n\n"
+                    f"📝 Ситуация {current_situation}/3\n\n"
+                )
+            
+            # Show first field
+            field_name = field_info.get("name", "Поле")
+            field_description = field_info.get("description", "")
+            min_items = field_info.get("min_items")
+            
+            field_text = intro_text
             field_text += f"**{field_name}**\n"
             if field_description:
                 field_text += f"{field_description}\n"
-            min_items = first_field.get("min_items")
             if min_items:
-                field_text += f"\n⚠️ Важно: нужно указать минимум {min_items} элемента(ов).\n"
+                field_text += f"\n⚠️ Нужно указать минимум {min_items} (через запятую)\n"
             field_text += "\nВведи значение:"
             
-            await edit_long_message(callback, field_text)
+            await edit_long_message(callback, field_text, reply_markup=build_template_filling_markup())
             await state.set_state(StepState.filling_template)
             await callback.answer()
             
@@ -2267,7 +2296,10 @@ async def handle_question_view_callback(callback: CallbackQuery, state: FSMConte
 
 
 async def handle_template_field_input(message: Message, state: FSMContext) -> None:
-    """Handle input for template field"""
+    """
+    Handle input for template field in FSM mode.
+    Uses backend API for progress tracking.
+    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -2281,83 +2313,117 @@ async def handle_template_field_input(message: Message, state: FSMContext) -> No
             return
         
         state_data = await state.get_data()
-        template_fields = state_data.get("template_fields", [])
-        current_field_index = state_data.get("current_field_index", 0)
-        template_values = state_data.get("template_values", {})
+        step_id = state_data.get("template_step_id")
+        question_id = state_data.get("template_question_id")
         
-        if not template_fields or current_field_index >= len(template_fields):
+        if not step_id or not question_id:
             await message.answer("Ошибка: данные шаблона потеряны. Начни заново.")
             await state.clear()
             return
         
-        # Save current field value
-        current_field = template_fields[current_field_index]
-        # Support both formats: {"name": "..."} or {"key": "...", "name": "..."}
-        field_key = current_field.get("key") or current_field.get("name", f"field_{current_field_index}")
-        field_name = current_field.get("name", field_key)
-        template_values[field_key] = field_value
+        # Submit field value to backend
+        result = await BACKEND_CLIENT.submit_template_field(
+            token, step_id, question_id, field_value
+        )
         
-        # Check if there are more fields
-        next_field_index = current_field_index + 1
+        if not result:
+            await message.answer("Ошибка сервера. Попробуй ещё раз.")
+            return
         
-        if next_field_index < len(template_fields):
-            # Show next field
-            next_field = template_fields[next_field_index]
-            # Support both formats
-            next_field_key = next_field.get("key") or next_field.get("name", "field")
-            next_field_name = next_field.get("name", next_field_key)
-            next_field_description = next_field.get("description", "")
-            next_min_items = next_field.get("min_items")
-            
-            field_text = f"✅ Сохранено: {field_name}\n\n"
-            field_text += f"**{next_field_name}**\n"
-            if next_field_description:
-                field_text += f"{next_field_description}\n"
-            if next_min_items:
-                field_text += f"\n⚠️ Важно: нужно указать минимум {next_min_items} элемента(ов).\n"
-            field_text += "\nВведи значение:"
-            
-            await send_long_message(message, field_text)
-            await state.update_data(
-                current_field_index=next_field_index,
-                template_values=template_values
+        # Check for validation error
+        if not result.get("success"):
+            error_msg = result.get("error", "Ошибка валидации")
+            await message.answer(
+                f"⚠️ {error_msg}\n\nПопробуй ещё раз:",
+                reply_markup=build_template_filling_markup()
             )
-        else:
-            # All fields filled, combine into JSON and submit
-            import json
-            combined_answer = json.dumps(template_values, ensure_ascii=False, indent=2)
+            return
+        
+        # Check if template is complete
+        if result.get("is_complete"):
+            formatted_answer = result.get("formatted_answer", "")
             
-            # Submit answer with template format flag
-            success = await BACKEND_CLIENT.submit_step_answer(token, combined_answer, is_template_format=True)
+            # Save the formatted answer
+            success = await BACKEND_CLIENT.submit_step_answer(token, formatted_answer, is_template_format=True)
             
             if success:
                 # Get next question
                 step_next = await BACKEND_CLIENT.get_next_step(token)
                 
                 if step_next:
-                    response_text = step_next.get("message", "Ответ сохранён!")
+                    response_text = step_next.get("message", "")
                     is_completed = step_next.get("is_completed", False)
                     
                     await send_long_message(
                         message,
-                        f"✅ Ответ по шаблону сохранён!\n\n{response_text}",
+                        f"✅ Шаблон полностью заполнен!\n\n"
+                        f"📝 Твой ответ сохранён.\n\n"
+                        f"{response_text}",
                         reply_markup=build_step_actions_markup()
                     )
                     
                     if is_completed:
                         await message.answer(
-                            "Этап завершен! 🎉 Возвращаю в обычный режим.",
+                            "Этап завершен! 🎉",
                             reply_markup=build_main_menu_markup()
                         )
                         await state.clear()
                     else:
                         await state.set_state(StepState.answering)
                 else:
-                    await message.answer("Ответ сохранён, но не удалось получить следующий вопрос.")
-                    await state.clear()
+                    await message.answer("Ответ сохранён!")
+                    await state.set_state(StepState.answering)
             else:
-                await message.answer("Ошибка при сохранении ответа. Попробуй ещё раз.")
-                await state.clear()
+                await message.answer("Ошибка при сохранении. Попробуй ещё раз.")
+            return
+        
+        # Build message for next field
+        field_info = result.get("field_info", {})
+        current_situation = result.get("current_situation", 1)
+        is_situation_complete = result.get("is_situation_complete", False)
+        ready_for_conclusion = result.get("ready_for_conclusion", False)
+        progress_summary = result.get("progress_summary", "")
+        
+        if ready_for_conclusion:
+            # All 3 situations done, ask for conclusion
+            await message.answer(
+                f"✅ Ситуация {current_situation - 1} завершена!\n\n"
+                f"🎯 Все 3 ситуации заполнены!\n\n"
+                f"Теперь напиши **Финальный вывод**:\n\n"
+                f"• Как ты теперь видишь ситуацию?\n"
+                f"• Что на самом деле происходило?\n"
+                f"• Как повторялись чувства/мысли/действия?\n"
+                f"• Где была болезнь, где был ты?",
+                reply_markup=build_template_filling_markup(),
+                parse_mode="Markdown"
+            )
+        elif is_situation_complete:
+            # Current situation done, moving to next
+            await message.answer(
+                f"✅ Ситуация {current_situation - 1} завершена!\n\n"
+                f"📝 Переходим к Ситуации {current_situation}\n\n"
+                f"**{field_info.get('name', 'Поле')}**\n"
+                f"{field_info.get('description', '')}\n\n"
+                f"Введи значение:",
+                reply_markup=build_template_filling_markup(),
+                parse_mode="Markdown"
+            )
+        else:
+            # Next field in current situation
+            min_items = field_info.get("min_items")
+            field_text = f"✅ Сохранено!\n\n"
+            field_text += f"📝 Ситуация {current_situation}/3\n\n"
+            field_text += f"**{field_info.get('name', 'Поле')}**\n"
+            field_text += f"{field_info.get('description', '')}\n"
+            if min_items:
+                field_text += f"\n⚠️ Нужно указать минимум {min_items} (через запятую)\n"
+            field_text += "\nВведи значение:"
+            
+            await message.answer(
+                field_text,
+                reply_markup=build_template_filling_markup(),
+                parse_mode="Markdown"
+            )
             
     except Exception as exc:
         logger.exception("Error handling template field input for %s: %s", telegram_id, exc)
