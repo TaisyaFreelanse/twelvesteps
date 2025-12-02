@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'k8a9b0c1d2e3'
@@ -21,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     conn = op.get_bind()
     
-    # Create enum type for template progress status (only if not exists)
+    # Check if enum type already exists
     result = conn.execute(
         sa.text("SELECT 1 FROM pg_type WHERE typname = 'template_progress_status_enum'")
     )
@@ -36,45 +35,35 @@ def upgrade() -> None:
         # Table already exists, skip creation
         return
     
-    # Create template_progress table
-    op.create_table(
-        'template_progress',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('step_id', sa.Integer(), nullable=False),
-        sa.Column('question_id', sa.Integer(), nullable=False),
-        sa.Column('status', sa.Enum('IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED', name='template_progress_status_enum', create_type=False), 
-                  server_default='IN_PROGRESS', nullable=False),
-        sa.Column('current_situation', sa.Integer(), nullable=False, server_default='1'),
-        sa.Column('current_field', sa.String(50), nullable=False, server_default='where'),
-        sa.Column('situations', sa.JSON(), nullable=True),
-        sa.Column('conclusion', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now(), nullable=False),
-        sa.Column('paused_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['step_id'], ['steps.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['question_id'], ['step_questions.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('user_id', 'step_id', 'question_id', name='uq_template_progress_user_step_question')
-    )
+    # Create template_progress table using raw SQL to avoid SQLAlchemy auto-creating enum
+    op.execute("""
+        CREATE TABLE template_progress (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            step_id INTEGER NOT NULL REFERENCES steps(id) ON DELETE CASCADE,
+            question_id INTEGER NOT NULL REFERENCES step_questions(id) ON DELETE CASCADE,
+            status template_progress_status_enum NOT NULL DEFAULT 'IN_PROGRESS',
+            current_situation INTEGER NOT NULL DEFAULT 1,
+            current_field VARCHAR(50) NOT NULL DEFAULT 'where',
+            situations JSONB,
+            conclusion TEXT,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+            paused_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            CONSTRAINT uq_template_progress_user_step_question UNIQUE (user_id, step_id, question_id)
+        )
+    """)
     
-    # Create indexes (with IF NOT EXISTS via raw SQL)
+    # Create indexes
     op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_user_id ON template_progress (user_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_step_id ON template_progress (step_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_question_id ON template_progress (question_id)")
 
 
 def downgrade() -> None:
-    # Drop indexes
-    op.drop_index('ix_template_progress_question_id', 'template_progress')
-    op.drop_index('ix_template_progress_step_id', 'template_progress')
-    op.drop_index('ix_template_progress_user_id', 'template_progress')
-    
-    # Drop table
-    op.drop_table('template_progress')
+    # Drop table (indexes will be dropped automatically)
+    op.execute("DROP TABLE IF EXISTS template_progress")
     
     # Drop enum type
     op.execute("DROP TYPE IF EXISTS template_progress_status_enum")
-
