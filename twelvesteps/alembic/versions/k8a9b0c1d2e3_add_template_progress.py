@@ -19,13 +19,22 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum type for template progress status
-    template_progress_status_enum = postgresql.ENUM(
-        'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED',
-        name='template_progress_status_enum',
-        create_type=False
+    conn = op.get_bind()
+    
+    # Create enum type for template progress status (only if not exists)
+    result = conn.execute(
+        sa.text("SELECT 1 FROM pg_type WHERE typname = 'template_progress_status_enum'")
     )
-    template_progress_status_enum.create(op.get_bind(), checkfirst=True)
+    if not result.fetchone():
+        op.execute("CREATE TYPE template_progress_status_enum AS ENUM ('IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED')")
+    
+    # Check if table already exists
+    table_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = 'template_progress'")
+    )
+    if table_exists.fetchone():
+        # Table already exists, skip creation
+        return
     
     # Create template_progress table
     op.create_table(
@@ -34,7 +43,7 @@ def upgrade() -> None:
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('step_id', sa.Integer(), nullable=False),
         sa.Column('question_id', sa.Integer(), nullable=False),
-        sa.Column('status', sa.Enum('IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED', name='template_progress_status_enum'), 
+        sa.Column('status', sa.Enum('IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED', name='template_progress_status_enum', create_type=False), 
                   server_default='IN_PROGRESS', nullable=False),
         sa.Column('current_situation', sa.Integer(), nullable=False, server_default='1'),
         sa.Column('current_field', sa.String(50), nullable=False, server_default='where'),
@@ -51,10 +60,10 @@ def upgrade() -> None:
         sa.UniqueConstraint('user_id', 'step_id', 'question_id', name='uq_template_progress_user_step_question')
     )
     
-    # Create indexes
-    op.create_index('ix_template_progress_user_id', 'template_progress', ['user_id'])
-    op.create_index('ix_template_progress_step_id', 'template_progress', ['step_id'])
-    op.create_index('ix_template_progress_question_id', 'template_progress', ['question_id'])
+    # Create indexes (with IF NOT EXISTS via raw SQL)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_user_id ON template_progress (user_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_step_id ON template_progress (step_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_template_progress_question_id ON template_progress (question_id)")
 
 
 def downgrade() -> None:
