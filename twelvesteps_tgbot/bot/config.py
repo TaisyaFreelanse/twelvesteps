@@ -34,14 +34,14 @@ def build_main_menu_markup() -> ReplyKeyboardMarkup:
     According to requirements:
     - 🪜 Работа по шагу
     - 📖 Самоанализ (десятый шаг) — отдельная вечерняя инвентаризация
-    - 💬 GPT-чат (свободный) — работает с учетом памяти, блоков, фреймов
-    - ❓ Помощь (SOS) — примеры, поддержка, справка
+    - ❓ FAQ — часто задаваемые вопросы
     - ⚙️ Настройки — смена шаблона, сброс
+    - 🙏 Благодарность
     """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🪜 Работа по шагу"), KeyboardButton(text="📖 Самоанализ")],
-            [KeyboardButton(text="🆘 Помощь (SOS)"), KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="❓ FAQ"), KeyboardButton(text="⚙️ Настройки")],
             [KeyboardButton(text="🙏 Благодарность")],
         ],
         resize_keyboard=True,
@@ -273,21 +273,28 @@ def format_step_progress_indicator(
     return "\n".join(indicator_parts)
 
 
-def build_step_actions_markup() -> InlineKeyboardMarkup:
+def build_step_actions_markup(has_template_progress: bool = False) -> InlineKeyboardMarkup:
     """Markup for additional step actions during answering."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🆘 Нужна помощь", callback_data="sos_help")],
-        [InlineKeyboardButton(text="🧩 Заполнить по шаблону", callback_data="step_template")],
-        [InlineKeyboardButton(text="🔢 Выбрать другой шаг", callback_data="steps_select")],
-        [
-            InlineKeyboardButton(text="⏸ Пауза", callback_data="step_pause"),
-            InlineKeyboardButton(text="🔁 Другой вопрос", callback_data="step_switch_question")
-        ],
-        [
-            InlineKeyboardButton(text="📜 Предыдущий", callback_data="step_previous"),
-            InlineKeyboardButton(text="➕ Добавить ещё", callback_data="step_add_more")
-        ]
+    buttons = []
+    
+    # SOS only in active step mode
+    buttons.append([InlineKeyboardButton(text="🆘 Нужна помощь", callback_data="sos_help")])
+    
+    # Template button - show "Продолжить" if has progress, otherwise "Заполнить"
+    if has_template_progress:
+        buttons.append([InlineKeyboardButton(text="📋 Продолжить шаблон", callback_data="step_template")])
+        buttons.append([InlineKeyboardButton(text="👁️ Посмотреть что заполнено", callback_data="step_view_template")])
+    else:
+        buttons.append([InlineKeyboardButton(text="🧩 Заполнить по шаблону", callback_data="step_template")])
+    
+    buttons.append([InlineKeyboardButton(text="🔢 Выбрать другой шаг", callback_data="steps_select")])
+    buttons.append([
+        InlineKeyboardButton(text="⏸ Пауза", callback_data="step_pause"),
+        InlineKeyboardButton(text="🔁 Другой вопрос", callback_data="step_switch_question")
     ])
+    buttons.append([InlineKeyboardButton(text="📜 Предыдущий вопрос", callback_data="step_previous")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def build_template_filling_markup() -> InlineKeyboardMarkup:

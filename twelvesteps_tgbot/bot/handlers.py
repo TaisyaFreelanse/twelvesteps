@@ -95,7 +95,7 @@ def register_handlers(dp: Dispatcher) -> None:
     # 1.5. Main menu button text handlers (for button clicks)
     dp.message(F.text == "🪜 Работа по шагу")(handle_steps)
     dp.message(F.text == "📖 Самоанализ")(handle_day)
-    dp.message(F.text == "🆘 Помощь (SOS)")(handle_sos)
+    dp.message(F.text == "❓ FAQ")(handle_faq)
     dp.message(F.text == "⚙️ Настройки")(handle_steps_settings)
     dp.message(F.text == "🙏 Благодарность")(handle_thanks)
 
@@ -163,7 +163,8 @@ def register_handlers(dp: Dispatcher) -> None:
 async def handle_steps(message: Message, state: FSMContext) -> None:
     """
     Activates 'Step Mode'. Fetches the current question and sets FSM state.
-    Checks if user has selected a template, if not - shows template selection.
+    Automatically uses author template if none selected.
+    Shows status (step, question, progress) at the top.
     """
     telegram_id = message.from_user.id
     username = message.from_user.username
@@ -175,22 +176,23 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
             await message.answer("Сначала нажми /start для авторизации.")
             return
         
-        # Check if user has active template
+        # Check if user has active template, if not - set author template automatically
         templates_data = await BACKEND_CLIENT.get_templates(token)
         active_template_id = templates_data.get("active_template_id")
         
-        # If no active template, show template selection
         if active_template_id is None:
-            await message.answer(
-                "📋 Перед началом работы выбери шаблон для ответов:\n\n"
-                "🧩 Авторский шаблон — структурированный шаблон с полями\n"
-                "✍️ Свой шаблон — создай свой формат ответов\n\n"
-                "Можно изменить позже в настройках.",
-                reply_markup=build_template_selection_markup()
-            )
-            return
+            # Automatically set author template
+            templates = templates_data.get("templates", [])
+            author_template = None
+            for template in templates:
+                if template.get("template_type") == "AUTHOR":
+                    author_template = template
+                    break
+            
+            if author_template:
+                await BACKEND_CLIENT.set_active_template(token, author_template.get("id"))
         
-        # User has template, proceed with steps
+        # Proceed with steps
         # Get current step info with progress indicators
         step_info = await BACKEND_CLIENT.get_current_step_info(token)
         step_number = step_info.get("step_number")
@@ -222,12 +224,44 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
                     return
                 
                 if response_text:
+                    # Check if there's paused template progress
+                    step_id = step_info.get("step_id")
+                    question_id = None
+                    template_progress = None
+                    
+                    # Try to get current question ID and template progress from backend
+                    try:
+                        # Get current question info to find question_id
+                        questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                        questions = questions_data.get("questions", [])
+                        answered_count = step_info.get("answered_questions", 0)
+                        if questions and answered_count < len(questions):
+                            current_question = questions[answered_count]
+                            question_id = current_question.get("id")
+                            
+                            # Check for template progress via backend
+                            if step_id and question_id:
+                                progress_data = await BACKEND_CLIENT.get_template_progress(token, step_id, question_id)
+                                if progress_data and progress_data.get("status") in ["IN_PROGRESS", "PAUSED"]:
+                                    template_progress = progress_data
+                    except Exception as e:
+                        logger.warning(f"Failed to check template progress: {e}")
+                    
+                    # Build status header
+                    status_header = f"📍 Ты сейчас на:\n{progress_indicator}\n"
+                    
+                    if template_progress:
+                        status_header += f"\n⏸ Есть сохранённый прогресс по шаблону\n"
+                        status_header += f"📊 {template_progress.get('progress_summary', '')}\n"
+                    
+                    status_header += "\n" + "─" * 30 + "\n"
+                    
                     # Save session context for STEPS
                     context_data = {
                         "step_number": step_number,
                         "step_title": step_info.get("step_title", ""),
                         "step_description": step_info.get("step_description", ""),
-                        "current_question": response_text[:200],  # First 200 chars of question
+                        "current_question": response_text[:200],
                         "total_steps": step_info.get("total_steps", 12),
                         "answered_questions": step_info.get("answered_questions", 0),
                         "total_questions": step_info.get("total_questions", 0)
@@ -237,17 +271,17 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
                     except Exception as e:
                         logger.warning(f"Failed to save session context: {e}")
                     
-                    # Show current step info with progress indicator
+                    # Show current step info with status header
                     step_description = step_info.get("step_description", "")
-                    full_text = progress_indicator
+                    full_text = status_header
                     if step_description:
-                        full_text += f"\n\n{step_description}"
-                    full_text += f"\n\n{response_text}"
+                        full_text += f"\n{step_description}\n"
+                    full_text += f"\n{response_text}"
                     
                     await send_long_message(
                         message,
                         full_text,
-                        reply_markup=build_step_actions_markup()
+                        reply_markup=build_step_actions_markup(has_template_progress=bool(template_progress))
                     )
                     # Set the state to 'answering' so the next message goes to handle_step_answer
                     await state.set_state(StepState.answering)
@@ -1020,6 +1054,32 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 
 
 # ---------------------------------------------------------
+# FAQ HANDLER
+# ---------------------------------------------------------
+
+async def handle_faq(message: Message, state: FSMContext) -> None:
+    """Handle FAQ command - show frequently asked questions"""
+    faq_text = (
+        "❓ Часто задаваемые вопросы\n\n"
+        "📘 Как работает программа 12 шагов?\n"
+        "Программа 12 шагов — это структурированный путь выздоровления от зависимости.\n\n"
+        "🪜 Как работать по шагам?\n"
+        "Нажми «🪜 Работа по шагу» и следуй инструкциям. Система будет задавать вопросы по порядку.\n\n"
+        "📖 Что такое самоанализ (10 шаг)?\n"
+        "Это ежедневная инвентаризация — 10 вопросов для анализа прошедшего дня.\n\n"
+        "🧩 Что такое шаблон ответа?\n"
+        "Структурированный формат для ответов на вопросы шага. Помогает систематизировать мысли.\n\n"
+        "⏸ Можно ли поставить на паузу?\n"
+        "Да, можно поставить на паузу в любой момент. Прогресс сохранится, и ты сможешь продолжить позже.\n\n"
+        "🆘 Нужна помощь?\n"
+        "В разделе «🪜 Работа по шагу» есть кнопка «🆘 Нужна помощь» для поддержки.\n\n"
+        "⚙️ Где настройки?\n"
+        "В главном меню есть кнопка «⚙️ Настройки» для изменения шаблона и других параметров."
+    )
+    await message.answer(faq_text, reply_markup=build_main_menu_markup())
+
+
+# ---------------------------------------------------------
 # DAY HANDLER (/day)
 # ---------------------------------------------------------
 
@@ -1692,12 +1752,16 @@ async def handle_template_filling_callback(callback: CallbackQuery, state: FSMCo
                 
                 if result and result.get("success"):
                     resume_info = result.get("resume_info", "")
+                    progress_summary = result.get("progress_summary", "")
                     await edit_long_message(
                         callback,
                         f"⏸ Прогресс сохранён!\n\n"
                         f"{resume_info}\n\n"
-                        f"Можешь вернуться позже и продолжить с этого места.\n"
-                        f"Для продолжения нажми «🧩 Заполнить по шаблону»",
+                        f"📊 {progress_summary}\n\n"
+                        f"💡 Чтобы продолжить:\n"
+                        f"1. Вернись к этому вопросу (🪜 Работа по шагу)\n"
+                        f"2. Нажми «🧩 Заполнить по шаблону»\n"
+                        f"3. Система автоматически продолжит с того места, где остановился",
                         reply_markup=build_step_actions_markup()
                     )
                     await state.set_state(StepState.answering)
@@ -2047,9 +2111,31 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             
             # Build intro message
             if is_resumed:
+                field_name = field_info.get("name", "поле")
+                situations = progress.get("situations", [])
+                
+                # Show what's already filled
+                filled_info = ""
+                if situations:
+                    completed_count = sum(1 for s in situations if s.get("complete"))
+                    filled_info = f"\n✅ Заполнено ситуаций: {completed_count}/3\n"
+                    
+                    # Show brief info about filled situations
+                    for i, situation in enumerate(situations[:completed_count], 1):
+                        if situation.get("complete"):
+                            where = situation.get("where", "")[:50]
+                            if where:
+                                filled_info += f"   Ситуация {i}: {where}...\n"
+                
                 intro_text = (
                     f"📋 Продолжаем заполнение шаблона!\n\n"
+                    f"⏸ Ты остановился на:\n"
+                    f"   Ситуация {current_situation}/3\n"
+                    f"   Поле: {field_name}\n"
+                    f"{filled_info}\n"
                     f"📊 {progress_summary}\n\n"
+                    f"💡 Продолжай с того места, где остановился.\n"
+                    f"👁️ Нажми «Посмотреть что заполнено» чтобы увидеть все детали.\n\n"
                 )
             else:
                 intro_text = (
@@ -2106,6 +2192,100 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 logger.error(f"Error in step_switch_question: {e}")
                 await callback.answer("Ошибка. Попробуй позже.")
             
+        elif data == "step_view_template":
+            # View filled template data
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
+                return
+            
+            step_id = step_info.get("step_id")
+            
+            # Get current question ID
+            questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+            questions = questions_data.get("questions", [])
+            answered_count = step_info.get("answered_questions", 0)
+            
+            if not questions or answered_count >= len(questions):
+                await callback.answer("Нет активного вопроса")
+                return
+            
+            current_question = questions[answered_count]
+            question_id = current_question.get("id")
+            
+            # Get template progress
+            progress = await BACKEND_CLIENT.get_template_progress(token, step_id, question_id)
+            
+            if not progress:
+                await callback.answer("Нет сохранённых данных по шаблону")
+                return
+            
+            # Format filled data for display
+            situations = progress.get("situations", [])
+            conclusion = progress.get("conclusion")
+            current_situation = progress.get("current_situation", 1)
+            current_field = progress.get("current_field", "")
+            
+            view_text = "📋 Что уже заполнено по шаблону:\n\n"
+            
+            if situations:
+                for i, situation in enumerate(situations, 1):
+                    if situation.get("complete"):
+                        view_text += f"📌 Ситуация {i}:\n"
+                        if situation.get("where"):
+                            view_text += f"  Где: {situation.get('where')}\n"
+                        if situation.get("thoughts"):
+                            view_text += f"  Мысли: {situation.get('thoughts')}\n"
+                        if situation.get("feelings_before"):
+                            feelings = situation.get("feelings_before", [])
+                            if isinstance(feelings, list):
+                                feelings_str = ", ".join(feelings)
+                            else:
+                                feelings_str = str(feelings)
+                            view_text += f"  Чувства (до): {feelings_str}\n"
+                        if situation.get("actions"):
+                            view_text += f"  Действие: {situation.get('actions')}\n"
+                        if situation.get("healthy_feelings"):
+                            view_text += f"  Здоровые чувства: {situation.get('healthy_feelings')}\n"
+                        if situation.get("next_step"):
+                            view_text += f"  Следующий шаг: {situation.get('next_step')}\n"
+                        view_text += "\n"
+                    elif i == current_situation:
+                        # Show partial data for current situation
+                        view_text += f"📌 Ситуация {i} (заполняется):\n"
+                        if situation.get("where"):
+                            view_text += f"  Где: {situation.get('where')}\n"
+                        if situation.get("thoughts"):
+                            view_text += f"  Мысли: {situation.get('thoughts')}\n"
+                        if situation.get("feelings_before"):
+                            feelings = situation.get("feelings_before", [])
+                            if isinstance(feelings, list):
+                                feelings_str = ", ".join(feelings)
+                            else:
+                                feelings_str = str(feelings)
+                            view_text += f"  Чувства (до): {feelings_str}\n"
+                        if situation.get("actions"):
+                            view_text += f"  Действие: {situation.get('actions')}\n"
+                        if situation.get("healthy_feelings"):
+                            view_text += f"  Здоровые чувства: {situation.get('healthy_feelings')}\n"
+                        if situation.get("next_step"):
+                            view_text += f"  Следующий шаг: {situation.get('next_step')}\n"
+                        view_text += f"  ⏸ Остановился на поле: {current_field}\n"
+                        view_text += "\n"
+            
+            if conclusion:
+                view_text += f"📌 Финальный вывод:\n{conclusion}\n"
+            
+            view_text += f"\n{progress.get('progress_summary', '')}"
+            
+            await send_long_message(
+                callback.message,
+                view_text,
+                reply_markup=build_step_actions_markup(has_template_progress=True)
+            )
+            await callback.answer()
+            return
+        
         elif data == "step_previous":
             # Get previous question (if exists)
             try:
@@ -2156,36 +2336,6 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             except Exception as e:
                 logger.error(f"Error in step_previous: {e}")
                 await callback.answer("Ошибка. Попробуй позже.")
-            
-        elif data == "step_add_more":
-            # Allow user to add more to current answer (reopen current question)
-            step_info = await BACKEND_CLIENT.get_current_step_info(token)
-            step_id = step_info.get("step_id")
-            
-            if step_id:
-                # Get current question again
-                step_data = await get_current_step_question(
-                    telegram_id=telegram_id,
-                    username=username,
-                    first_name=first_name
-                )
-                
-                if step_data:
-                    response_text = step_data.get("message", "")
-                    if response_text:
-                        await edit_long_message(
-                            callback,
-                            f"➕ Добавь ещё к ответу:\n\n{response_text}",
-                            reply_markup=build_step_actions_markup()
-                        )
-                        await state.set_state(StepState.answering)
-                        await callback.answer("Можешь дополнить ответ")
-                    else:
-                        await callback.answer("Нет текущего вопроса")
-                else:
-                    await callback.answer("Ошибка получения вопроса")
-            else:
-                await callback.answer("Шаг не выбран")
             
     except Exception as exc:
         logger.exception("Error handling step action callback for %s: %s", telegram_id, exc)
@@ -2508,8 +2658,18 @@ async def handle_template_field_input(message: Message, state: FSMContext) -> No
         # Check for validation error
         if not result.get("success"):
             error_msg = result.get("error", "Ошибка валидации")
+            validation_error = result.get("validation_error", False)
+            
+            # Если это ошибка валидации чувств, показываем текущие чувства
+            if validation_error and result.get("current_feelings"):
+                current_feelings = result.get("current_feelings", [])
+                current_count = result.get("current_count", 0)
+                if current_feelings:
+                    feelings_text = ", ".join(current_feelings)
+                    error_msg = f"{error_msg}\n\n📝 Уже указано ({current_count}): {feelings_text}"
+            
             await message.answer(
-                f"⚠️ {error_msg}\n\nПопробуй ещё раз:",
+                f"⚠️ {error_msg}\n\n💡 Совет: можешь написать все чувства через запятую в одном сообщении, или добавлять по одному.",
                 reply_markup=build_template_filling_markup()
             )
             return

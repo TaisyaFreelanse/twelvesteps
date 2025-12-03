@@ -159,14 +159,37 @@ class TemplateService:
             }
         
         # Валидация для feelings_before (минимум 3 чувства)
+        # Накопление чувств: добавляем к уже сохраненным
         if current_field == "feelings_before":
-            feelings = [f.strip() for f in value.replace('\n', ',').split(',') if f.strip()]
-            if len(feelings) < 3:
+            # Получаем уже сохраненные чувства из текущей ситуации
+            situations = progress.situations or []
+            current_sit_idx = progress.current_situation - 1
+            existing_feelings = []
+            
+            if len(situations) > current_sit_idx:
+                existing_feelings = situations[current_sit_idx].get("feelings_before", [])
+                if not isinstance(existing_feelings, list):
+                    existing_feelings = []
+            
+            # Парсим новые чувства из текущего сообщения
+            new_feelings = [f.strip() for f in value.replace('\n', ',').split(',') if f.strip()]
+            
+            # Объединяем существующие и новые, убираем дубликаты
+            all_feelings = list(dict.fromkeys(existing_feelings + new_feelings))  # dict.fromkeys сохраняет порядок
+            
+            if len(all_feelings) < 3:
+                remaining = 3 - len(all_feelings)
                 return {
                     "success": False,
-                    "error": f"Нужно указать минимум 3 чувства. Ты указал: {len(feelings)}. Напиши ещё.",
-                    "validation_error": True
+                    "error": f"Нужно указать минимум 3 чувства. Сейчас у тебя: {len(all_feelings)} ({', '.join(all_feelings) if all_feelings else 'пока нет'}). Осталось добавить ещё {remaining}. Напиши через запятую или отдельным сообщением.",
+                    "validation_error": True,
+                    "current_count": len(all_feelings),
+                    "current_feelings": all_feelings
                 }
+            
+            # Если достаточно чувств, сохраняем объединенный список
+            # Это будет сделано в save_field_value, но нужно передать объединенный список
+            value = ", ".join(all_feelings)
         
         # Сохраняем значение и получаем следующее поле
         result = await self.progress_repo.save_field_value(progress, current_field, value)

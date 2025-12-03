@@ -129,9 +129,17 @@ class TemplateProgressRepository:
         
         # Сохраняем значение
         if field_key == "feelings_before":
-            # Парсим чувства (разделенные запятой или новой строкой)
-            feelings = [f.strip() for f in value.replace('\n', ',').split(',') if f.strip()]
-            current_situation[field_key] = feelings
+            # Для feelings_before накапливаем чувства, а не перезаписываем
+            existing_feelings = current_situation.get(field_key, [])
+            if not isinstance(existing_feelings, list):
+                existing_feelings = []
+            
+            # Парсим новые чувства из текущего сообщения
+            new_feelings = [f.strip() for f in value.replace('\n', ',').split(',') if f.strip()]
+            
+            # Объединяем существующие и новые, убираем дубликаты (сохраняем порядок)
+            all_feelings = list(dict.fromkeys(existing_feelings + new_feelings))
+            current_situation[field_key] = all_feelings
         else:
             current_situation[field_key] = value
         
