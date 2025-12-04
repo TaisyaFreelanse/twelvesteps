@@ -43,7 +43,7 @@ class SosService:
             return active_tail.question.step_id
         return None
     
-    async def build_sos_prompt(self, help_type: str, step_number: int, question_text: str) -> Optional[str]:
+    async def build_sos_prompt(self, help_type: str, step_number: int, question_text: str, user_context: Optional[str] = None, time_window: str = "за последние 72 часа") -> Optional[str]:
         """
         Build specialized SOS prompt based on help type using knowledge base.
         
@@ -51,6 +51,7 @@ class SosService:
         - 'direction': Помоги понять куда смотреть (replaces 'memory')
         - 'question': Не понимаю вопрос
         - 'support': Просто тяжело — нужна поддержка
+        - 'examples': Нужны примеры
         """
         # Load template based on help type
         if help_type == "direction" or help_type == "memory":
@@ -62,6 +63,8 @@ class SosService:
             template = await PromptRepository.load_sos_question_prompt()
         elif help_type == "support":
             template = await PromptRepository.load_sos_support_prompt()
+        elif help_type == "examples":
+            template = await PromptRepository.load_sos_examples_prompt()
         else:
             return None
         
@@ -71,6 +74,14 @@ class SosService:
         # For 'support' type, no need for knowledge base - return as is
         if help_type == "support":
             return template
+        
+        # For 'examples' type, replace specific placeholders
+        if help_type == "examples":
+            prompt = template.replace("{{step_number}}", str(step_number))
+            prompt = prompt.replace("{{step_question}}", question_text)
+            prompt = prompt.replace("{{time_window}}", time_window)
+            prompt = prompt.replace("{{user_context}}", user_context or "не указано")
+            return prompt
         
         # Load knowledge for this step (for direction and question types)
         step_knowledge = await PromptRepository.get_step_knowledge(step_number)
@@ -138,8 +149,14 @@ class SosService:
                 effective_type = "direction"  # 'memory' renamed to 'direction'
             
             # Try to load specialized prompt
-            if effective_type in ["direction", "question", "support"]:
-                specialized_prompt = await self.build_sos_prompt(effective_type, step_number, question_text)
+            if effective_type in ["direction", "question", "support", "examples"]:
+                # Get user context if available (HALT, time of day, etc.)
+                user_context = None  # TODO: Extract from user profile or session
+                time_window = "за последние 72 часа"
+                specialized_prompt = await self.build_sos_prompt(
+                    effective_type, step_number, question_text, 
+                    user_context=user_context, time_window=time_window
+                )
             
             if specialized_prompt:
                 # Use specialized prompt with knowledge base

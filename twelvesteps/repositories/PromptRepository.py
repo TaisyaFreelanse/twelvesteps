@@ -158,3 +158,15 @@ class PromptRepository:
                 return json.loads(content).get("prompt", "")
         except FileNotFoundError:
             return None
+    
+    @staticmethod
+    async def load_sos_examples_prompt():
+        """
+        Loads the SOS prompt for 'examples' help type (Нужны примеры).
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/sos_examples.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None
