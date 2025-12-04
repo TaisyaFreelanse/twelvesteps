@@ -43,6 +43,59 @@ class SosService:
             return active_tail.question.step_id
         return None
     
+    async def _get_user_context(self, user_id: int) -> Optional[str]:
+        """Extract user context (HALT, time of day, cravings, etc.) from session context"""
+        try:
+            from repositories.SessionContextRepository import SessionContextRepository
+            from db.models import SessionType
+            
+            session_context_repo = SessionContextRepository(self.session)
+            active_context = await session_context_repo.get_active_context(user_id)
+            
+            if active_context and active_context.context_data:
+                context_parts = []
+                context_data = active_context.context_data
+                
+                # Extract HALT states
+                halt_states = []
+                if context_data.get("hungry"):
+                    halt_states.append("голод")
+                if context_data.get("angry"):
+                    halt_states.append("злость")
+                if context_data.get("lonely"):
+                    halt_states.append("одиночество")
+                if context_data.get("tired"):
+                    halt_states.append("усталость")
+                
+                if halt_states:
+                    context_parts.append(f"HALT: {', '.join(halt_states)}")
+                
+                # Extract time of day
+                from datetime import datetime
+                current_hour = datetime.now().hour
+                if 6 <= current_hour < 12:
+                    context_parts.append("утро")
+                elif 12 <= current_hour < 18:
+                    context_parts.append("день")
+                elif 18 <= current_hour < 22:
+                    context_parts.append("вечер")
+                else:
+                    context_parts.append("ночь")
+                
+                # Extract craving if mentioned
+                if context_data.get("craving") or context_data.get("urge"):
+                    context_parts.append("тяга")
+                
+                if context_parts:
+                    return ", ".join(context_parts)
+        except Exception as e:
+            # Log error but don't fail
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to extract user context: {e}")
+        
+        return None
+    
     async def build_sos_prompt(self, help_type: str, step_number: int, question_text: str, user_context: Optional[str] = None, time_window: str = "за последние 72 часа") -> Optional[str]:
         """
         Build specialized SOS prompt based on help type using knowledge base.
@@ -151,7 +204,7 @@ class SosService:
             # Try to load specialized prompt
             if effective_type in ["direction", "question", "support", "examples"]:
                 # Get user context if available (HALT, time of day, etc.)
-                user_context = None  # TODO: Extract from user profile or session
+                user_context = await self._get_user_context(user_id)
                 time_window = "за последние 72 часа"
                 specialized_prompt = await self.build_sos_prompt(
                     effective_type, step_number, question_text, 
