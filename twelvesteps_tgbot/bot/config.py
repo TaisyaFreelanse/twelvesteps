@@ -32,17 +32,15 @@ def build_main_menu_markup() -> ReplyKeyboardMarkup:
     Produce the quick action keyboard shown after onboarding or in main flow.
     
     According to requirements:
-    - 🪜 Работа по шагу
-    - 📖 Самоанализ (десятый шаг) — отдельная вечерняя инвентаризация
-    - ❓ FAQ — часто задаваемые вопросы
-    - ⚙️ Настройки — смена шаблона, сброс
-    - 🙏 Благодарность
+    - 🪜 Работа по шагу     📖 Самоанализ  
+    - 📘 Чувства            🙏 Благодарности  
+    - ⚙️ Настройки          📎 Инструкция
     """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🪜 Работа по шагу"), KeyboardButton(text="📖 Самоанализ")],
-            [KeyboardButton(text="❓ FAQ"), KeyboardButton(text="⚙️ Настройки")],
-            [KeyboardButton(text="🙏 Благодарность")],
+            [KeyboardButton(text="📘 Чувства"), KeyboardButton(text="🙏 Благодарности")],
+            [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="📎 Инструкция")],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
@@ -165,11 +163,9 @@ def build_template_selection_markup() -> InlineKeyboardMarkup:
 def build_sos_help_type_markup() -> InlineKeyboardMarkup:
     """Markup for selecting type of help in SOS."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📌 Не понимаю вопрос", callback_data="sos_help_question")],
+        [InlineKeyboardButton(text="💭 Не понял вопрос", callback_data="sos_help_question")],
         [InlineKeyboardButton(text="🔍 Хочу примеры", callback_data="sos_help_examples")],
-        [InlineKeyboardButton(text="🧭 Помоги понять куда смотреть", callback_data="sos_help_direction")],
-        [InlineKeyboardButton(text="😶 Просто тяжело, нужна поддержка", callback_data="sos_help_support")],
-        [InlineKeyboardButton(text="✍️ Своё", callback_data="sos_help_custom")],
+        [InlineKeyboardButton(text="🪫 Просто тяжело", callback_data="sos_help_support")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="sos_cancel")]
     ])
 
@@ -275,25 +271,23 @@ def format_step_progress_indicator(
 
 
 def build_step_actions_markup(has_template_progress: bool = False) -> InlineKeyboardMarkup:
-    """Markup for additional step actions during answering."""
+    """Markup for step actions during answering."""
     buttons = []
     
-    # SOS only in active step mode
-    buttons.append([InlineKeyboardButton(text="🆘 Нужна помощь", callback_data="sos_help")])
-    
-    # Template button - show "Продолжить" if has progress, otherwise "Заполнить"
-    if has_template_progress:
-        buttons.append([InlineKeyboardButton(text="📋 Продолжить шаблон", callback_data="step_template")])
-        buttons.append([InlineKeyboardButton(text="👁️ Посмотреть что заполнено", callback_data="step_view_template")])
-    else:
-        buttons.append([InlineKeyboardButton(text="🧩 Заполнить по шаблону", callback_data="step_template")])
-    
-    buttons.append([InlineKeyboardButton(text="🔢 Выбрать другой шаг", callback_data="steps_select")])
+    # First row: Продолжить and Мой прогресс
     buttons.append([
-        InlineKeyboardButton(text="⏸ Пауза", callback_data="step_pause"),
-        InlineKeyboardButton(text="🔁 Другой вопрос", callback_data="step_switch_question")
+        InlineKeyboardButton(text="▶️ Продолжить", callback_data="step_continue"),
+        InlineKeyboardButton(text="📋 Мой прогресс", callback_data="step_progress")
     ])
-    buttons.append([InlineKeyboardButton(text="📜 Предыдущий вопрос", callback_data="step_previous")])
+    
+    # Second row: Помощь and Сохранить
+    buttons.append([
+        InlineKeyboardButton(text="🧭 Помощь", callback_data="sos_help"),
+        InlineKeyboardButton(text="⏸ Сохранить", callback_data="step_pause")
+    ])
+    
+    # Third row: Назад
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

@@ -95,9 +95,10 @@ def register_handlers(dp: Dispatcher) -> None:
     # 1.5. Main menu button text handlers (for button clicks)
     dp.message(F.text == "🪜 Работа по шагу")(handle_steps)
     dp.message(F.text == "📖 Самоанализ")(handle_day)
-    dp.message(F.text == "❓ FAQ")(handle_faq)
+    dp.message(F.text == "📘 Чувства")(handle_feelings)
+    dp.message(F.text == "🙏 Благодарности")(handle_thanks)
     dp.message(F.text == "⚙️ Настройки")(handle_steps_settings)
-    dp.message(F.text == "🙏 Благодарность")(handle_thanks)
+    dp.message(F.text == "📎 Инструкция")(handle_faq)
 
     # 2. Onboarding Flow
     register_onboarding_handlers(dp)
@@ -873,11 +874,11 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             # User selected a help type
             help_type = data.replace("sos_help_", "")
             help_type_map = {
-                "question": "Не понимаю вопрос",
+                "question": "Не понял вопрос",
                 "examples": "Хочу примеры",
                 "direction": "Помоги понять куда смотреть",
                 "memory": "Помоги понять куда смотреть",  # backwards compatibility
-                "support": "Просто тяжело, нужна поддержка"
+                "support": "Просто тяжело"
             }
             help_type_name = help_type_map.get(help_type, help_type)
             
@@ -1055,7 +1056,22 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 
 
 # ---------------------------------------------------------
-# FAQ HANDLER
+# FEELINGS HANDLER
+# ---------------------------------------------------------
+
+async def handle_feelings(message: Message, state: FSMContext) -> None:
+    """Handle Feelings button - show feelings table/selector"""
+    feelings_text = (
+        "📘 Чувства\n\n"
+        "Таблица чувств поможет тебе лучше понять и назвать свои эмоции.\n\n"
+        "Используй её при заполнении шаблона, особенно в блоке \"Чувства до / после\".\n\n"
+        "Не обязательно выбирать «правильно» — просто найди то, что ближе всего к тому, как ты ощущаешь."
+    )
+    await message.answer(feelings_text, reply_markup=build_main_menu_markup())
+
+
+# ---------------------------------------------------------
+# FAQ HANDLER (Инструкция)
 # ---------------------------------------------------------
 
 async def handle_faq(message: Message, state: FSMContext) -> None:
@@ -2091,8 +2107,73 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             await callback.answer("Ошибка авторизации. Нажми /start.")
             return
         
-        if data == "step_pause":
-            # Pause and save draft
+        if data == "step_continue":
+            # Continue working - just show current question again
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
+                return
+            
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if step_data:
+                response_text = step_data.get("message", "")
+                if response_text:
+                    progress_indicator = format_step_progress_indicator(
+                        step_number=step_info.get("step_number"),
+                        total_steps=step_info.get("total_steps", 12),
+                        step_title=step_info.get("step_title"),
+                        answered_questions=step_info.get("answered_questions", 0),
+                        total_questions=step_info.get("total_questions", 0)
+                    )
+                    full_text = f"{progress_indicator}\n\n{response_text}"
+                    await edit_long_message(
+                        callback,
+                        full_text,
+                        reply_markup=build_step_actions_markup()
+                    )
+                    await state.set_state(StepState.answering)
+                    await callback.answer()
+            return
+        
+        elif data == "step_progress":
+            # Show my progress
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
+                return
+            
+            # Get all steps progress
+            steps_list = await BACKEND_CLIENT.get_steps_list(token)
+            steps = steps_list.get("steps", []) if steps_list else []
+            
+            progress_text = "📋 Мой прогресс\n\n"
+            
+            for step in steps:
+                step_number = step.get("number", step.get("id"))
+                step_title = step.get("title", "")
+                answered = step.get("answered_questions", 0)
+                total = step.get("total_questions", 0)
+                
+                if answered > 0 or step.get("status") == "IN_PROGRESS":
+                    progress_text += f"🪜 Шаг {step_number} — {step_title} ({answered} / {total})\n"
+            
+            progress_text += "\n🔁 Сменить текущий шаг"
+            
+            buttons = [
+                [InlineKeyboardButton(text="🔁 Сменить текущий шаг", callback_data="steps_select")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")]
+            ]
+            
+            await edit_long_message(
+                callback,
+                progress_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            )
+            await callback.answer()
+            return
+        
+        elif data == "step_pause":
+            # Pause and save draft - return to steps panel
             await state.update_data(action="pause")
             await callback.answer("Напиши текст для черновика и отправь его")
             
@@ -2497,16 +2578,37 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
             return
         
         if data == "steps_back":
-            # Return to main menu
-            await callback.answer()  # Answer callback first to stop loading
-            await state.clear()
-            # Edit message without ReplyKeyboardMarkup (edit_text doesn't support it)
+            # Return to "Работа по шагу" screen (not main menu)
+            await callback.answer()
+            # Get current step info and show it
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if step_info:
+                step_number = step_info.get("step_number")
+                step_data = await get_current_step_question(telegram_id, username, first_name)
+                if step_data:
+                    response_text = step_data.get("message", "")
+                    if response_text:
+                        progress_indicator = format_step_progress_indicator(
+                            step_number=step_number,
+                            total_steps=step_info.get("total_steps", 12),
+                            step_title=step_info.get("step_title"),
+                            answered_questions=step_info.get("answered_questions", 0),
+                            total_questions=step_info.get("total_questions", 0)
+                        )
+                        full_text = f"{progress_indicator}\n\n{response_text}"
+                        await edit_long_message(
+                            callback,
+                            full_text,
+                            reply_markup=build_step_actions_markup()
+                        )
+                        await state.set_state(StepState.answering)
+                        return
+            # Fallback: show steps navigation
             await edit_long_message(
                 callback,
-                "✅ Вернулся в главное меню.",
-                reply_markup=None
+                "🪜 Работа по шагу",
+                reply_markup=build_steps_navigation_markup()
             )
-            # Send new message with ReplyKeyboardMarkup
             await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             return
         
