@@ -360,3 +360,329 @@ def build_reminders_settings_markup(reminders_enabled: bool = False) -> InlineKe
         [InlineKeyboardButton(text="📅 Дни недели", callback_data="settings_reminder_days")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")]
     ])
+
+
+# --- Main Settings Keyboards ---
+
+def build_main_settings_markup() -> InlineKeyboardMarkup:
+    """Main settings menu according to interface spec."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔔 Напоминания", callback_data="main_settings_reminders")],
+        [InlineKeyboardButton(text="🌐 Язык интерфейса", callback_data="main_settings_language")],
+        [InlineKeyboardButton(text="🪪 Мой профиль", callback_data="main_settings_profile")],
+        [InlineKeyboardButton(text="🔧 Настройки по шагу", callback_data="main_settings_steps")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
+    ])
+
+
+def build_language_settings_markup(current_lang: str = "ru") -> InlineKeyboardMarkup:
+    """Language selection menu."""
+    ru_prefix = "✅ " if current_lang == "ru" else ""
+    en_prefix = "✅ " if current_lang == "en" else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{ru_prefix}🇷🇺 Русский", callback_data="lang_ru")],
+        [InlineKeyboardButton(text=f"{en_prefix}🇺🇸 English", callback_data="lang_en")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
+    ])
+
+
+def build_step_settings_markup() -> InlineKeyboardMarkup:
+    """Step-specific settings menu."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔁 Начать заново текущий шаг", callback_data="step_settings_restart")],
+        [InlineKeyboardButton(text="✏️ Настроить кастомный шаблон", callback_data="step_settings_custom_template")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
+    ])
+
+
+def build_profile_settings_markup() -> InlineKeyboardMarkup:
+    """Profile settings menu."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Рассказать о себе", callback_data="profile_settings_about")],
+        [InlineKeyboardButton(text="🧭 Мои цели и мотивации (скоро)", callback_data="profile_settings_goals")],
+        [InlineKeyboardButton(text="📈 История шагов (скоро)", callback_data="profile_settings_history")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
+    ])
+
+
+def build_about_me_sections_markup() -> InlineKeyboardMarkup:
+    """About me sections menu."""
+    sections = [
+        ("🏠 Семья", "about_family"),
+        ("🧑‍🤝‍🧑 Друзья", "about_friends"),
+        ("🎓 Учёба", "about_education"),
+        ("🧒 Детство", "about_childhood"),
+        ("🎨 Хобби", "about_hobby"),
+        ("💼 Работа / Дело", "about_work"),
+        ("🙌 Поддержка рядом", "about_support"),
+        ("🕒 Режим и быт", "about_routine"),
+        ("🧭 Ценности и правила", "about_values"),
+        ("🛑 Границы и \"не трогать\"", "about_boundaries"),
+        ("💪 Сильные стороны", "about_strengths"),
+        ("🩺 Здоровье", "about_health"),
+        ("📜 Свободный рассказ", "about_free"),
+        ("➕ Добавить свой блок", "about_custom"),
+    ]
+    
+    buttons = []
+    row = []
+    for text, callback in sections:
+        row.append(InlineKeyboardButton(text=text, callback_data=callback))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_about_section_actions_markup(section_id: str) -> InlineKeyboardMarkup:
+    """Actions inside an about me section."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Добавить запись", callback_data=f"about_add_{section_id}"),
+            InlineKeyboardButton(text="🗃️ История", callback_data=f"about_history_{section_id}")
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")]
+    ])
+
+
+# --- Progress Keyboards ---
+
+def build_progress_step_markup(step_id: int, step_number: int, step_title: str) -> InlineKeyboardMarkup:
+    """Markup for viewing a specific step's progress with questions."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗂 Выбрать вопрос", callback_data=f"progress_questions_{step_id}")],
+        [InlineKeyboardButton(text="▶️ Продолжить работу", callback_data="steps_continue")],
+        [InlineKeyboardButton(text="◀️ Назад к списку шагов", callback_data="progress_steps_list")]
+    ])
+
+
+def build_progress_questions_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
+    """Markup for listing questions with status and allowing selection."""
+    buttons = []
+    for q in questions:
+        q_id = q.get("id")
+        q_number = q.get("number", 0)
+        q_text = q.get("text", "")[:35]
+        status = q.get("status", "")
+        answer_preview = q.get("answer_preview", "")
+        
+        # Status emoji
+        if status == "COMPLETED":
+            status_emoji = "✅"
+            if answer_preview:
+                display_text = f"{status_emoji} {q_number}. {answer_preview[:30]}..."
+            else:
+                display_text = f"{status_emoji} {q_number}. {q_text}..."
+        elif status == "IN_PROGRESS" or answer_preview:
+            status_emoji = "⏳"
+            display_text = f"{status_emoji} {q_number}. (черновик)"
+        else:
+            status_emoji = "⬜"
+            display_text = f"{status_emoji} {q_number}. {q_text}..."
+        
+        buttons.append([InlineKeyboardButton(
+            text=display_text[:60],
+            callback_data=f"progress_select_q_{q_id}"
+        )])
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"progress_step_{step_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_progress_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
+    """Markup for progress view - list of steps with their progress."""
+    buttons = []
+    for step in steps:
+        step_id = step.get("id")
+        step_number = step.get("number", step_id)
+        step_title = step.get("title", "")[:20]
+        answered = step.get("answered_questions", 0)
+        total = step.get("total_questions", 0)
+        
+        if answered > 0:
+            buttons.append([InlineKeyboardButton(
+                text=f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})",
+                callback_data=f"progress_step_{step_id}"
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                text=f"⬜ Шаг {step_number} — {step_title} (0/{total})",
+                callback_data=f"progress_step_{step_id}"
+            )])
+    
+    buttons.append([InlineKeyboardButton(text="🔁 Сменить текущий шаг", callback_data="steps_select")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# --- Gratitude/Thanks Keyboards ---
+
+def build_thanks_menu_markup() -> InlineKeyboardMarkup:
+    """Main gratitude/thanks menu."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить запись", callback_data="thanks_add")],
+        [InlineKeyboardButton(text="🗃️ История", callback_data="thanks_history")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="thanks_back")]
+    ])
+
+
+def build_thanks_history_markup(page: int = 1, has_more: bool = False) -> InlineKeyboardMarkup:
+    """Pagination for thanks history."""
+    buttons = []
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"thanks_page_{page - 1}"))
+    if has_more:
+        nav_row.append(InlineKeyboardButton(text="➡️ Вперёд", callback_data=f"thanks_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="thanks_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# --- Feelings Keyboards ---
+
+# Categorized feelings list based on the feelings table (таблица чувств)
+FEELINGS_CATEGORIES = {
+    "😠 ГНЕВ": [
+        "бешенство", "ярость", "ненависть", "истерия", "злость", "раздражение", 
+        "презрение", "негодование", "обида", "ревность", "уязвлённость", "досада", 
+        "зависть", "неприязнь", "возмущение", "отвращение"
+    ],
+    "😰 СТРАХ": [
+        "ужас", "отчаяние", "испуг", "оцепенение", "подозрение", "тревога", 
+        "ошарашенность", "беспокойство", "боязнь", "унижение", "замешательство", 
+        "растерянность", "вина", "стыд", "сомнение", "застенчивость", "опасение", 
+        "смущение", "сломленность", "надменность", "ошеломлённость"
+    ],
+    "😢 ГРУСТЬ": [
+        "горечь", "тоска", "скорбь", "лень", "жалость", "отрешённость", 
+        "отчаяние", "беспомощность", "душевная боль", "безнадёжность", 
+        "отчуждённость", "разочарование", "потрясение", "сожаление", "скука", 
+        "безысходность", "печаль", "загнанность"
+    ],
+    "😊 РАДОСТЬ": [
+        "счастье", "восторг", "ликование", "приподнятость", "оживление", 
+        "умиротворение", "увлечение", "интерес", "забота", "ожидание", 
+        "возбуждение", "предвкушение", "надежда", "любопытство", "освобождение", 
+        "принятие", "нетерпение", "вера", "изумление"
+    ],
+    "💗 ЛЮБОВЬ": [
+        "нежность", "теплота", "сочувствие", "блаженство", "доверие", 
+        "безопасность", "благостность", "спокойствие", "симпатия", "гордость", 
+        "восхищение", "уважение", "самоценность", "влюблённость", "любовь к себе", 
+        "очарованность", "смирение", "искренность", "дружелюбие", "доброта", "взаимовыручка"
+    ],
+    "🧠 СОСТОЯНИЯ": [
+        "нервозность", "пренебрежение", "недовольство", "вредность", "огорчение", 
+        "нетерпимость", "вседозволенность", "раскаяние", "безысходность", 
+        "превосходство", "высокомерие", "неполноценность", "неудобство", "неловкость", 
+        "апатия", "безразличие", "неуверенность", "тупик", "усталость", "принуждение", 
+        "одиночество", "отверженность", "подавленность", "холодность", "безучастность", 
+        "равнодушие", "удовлетворение", "уверенность", "довольство", "окрылённость", 
+        "торжественность", "жизнерадостность", "облегчение", "ободрённость", "удивление",
+        "сопереживание", "сопричастность", "уравновешенность", "смирение", 
+        "естественность", "жизнелюбие", "вдохновение", "воодушевление"
+    ]
+}
+
+# Common fears list (страхи)
+FEARS_LIST = [
+    "страх оценки", "страх ошибки", "страх нового", "страх одиночества", 
+    "страх ответственности", "страх темноты", "страх высоты", 
+    "страх разочарования в себе", "страх будущего", "страх за свою жизнь"
+]
+
+
+def build_feelings_categories_markup() -> InlineKeyboardMarkup:
+    """Markup for selecting feelings category."""
+    buttons = []
+    for category in FEELINGS_CATEGORIES.keys():
+        buttons.append([InlineKeyboardButton(text=category, callback_data=f"feelings_cat_{category[:10]}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="feelings_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_feelings_list_markup(category: str) -> InlineKeyboardMarkup:
+    """Markup for selecting specific feelings from a category."""
+    feelings = []
+    for cat_name, cat_feelings in FEELINGS_CATEGORIES.items():
+        if cat_name.startswith(category) or category in cat_name:
+            feelings = cat_feelings
+            break
+    
+    buttons = []
+    row = []
+    for feeling in feelings:
+        row.append(InlineKeyboardButton(text=feeling, callback_data=f"feeling_select_{feeling[:15]}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад к категориям", callback_data="feelings_categories")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_all_feelings_markup() -> InlineKeyboardMarkup:
+    """Markup with categories to choose from (table is too big for buttons)."""
+    buttons = []
+    
+    for category in FEELINGS_CATEGORIES.keys():
+        buttons.append([InlineKeyboardButton(text=category, callback_data=f"feelings_cat_{category}")])
+    
+    # Add fears button
+    buttons.append([InlineKeyboardButton(text="⚠️ СТРАХИ (список)", callback_data="feelings_fears")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="feelings_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_feelings_category_markup(category: str) -> InlineKeyboardMarkup:
+    """Show feelings from a specific category."""
+    feelings = FEELINGS_CATEGORIES.get(category, [])
+    
+    buttons = []
+    row = []
+    for feeling in feelings:
+        # Truncate long feelings for button
+        btn_text = feeling[:18] if len(feeling) > 18 else feeling
+        row.append(InlineKeyboardButton(text=btn_text, callback_data=f"feeling_copy_{feeling[:20]}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ К категориям", callback_data="feelings_categories")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_fears_markup() -> InlineKeyboardMarkup:
+    """Show list of common fears."""
+    buttons = []
+    for fear in FEARS_LIST:
+        buttons.append([InlineKeyboardButton(text=fear, callback_data=f"feeling_copy_{fear[:20]}")])
+    
+    buttons.append([InlineKeyboardButton(text="◀️ К категориям", callback_data="feelings_categories")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def format_feelings_table_text() -> str:
+    """Format the feelings table as text for display."""
+    text = "📘 ТАБЛИЦА ЧУВСТВ\n\n"
+    
+    for category, feelings in FEELINGS_CATEGORIES.items():
+        text += f"{category}\n"
+        # Join feelings with commas, wrap lines
+        feelings_line = ", ".join(feelings)
+        text += f"{feelings_line}\n\n"
+    
+    text += "⚠️ СТРАХИ:\n"
+    text += ", ".join(FEARS_LIST)
+    
+    return text

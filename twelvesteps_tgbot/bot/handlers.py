@@ -44,7 +44,27 @@ from bot.config import (
     build_step_actions_markup,
     build_steps_settings_markup,
     build_template_selection_settings_markup,
-    build_reminders_settings_markup
+    build_reminders_settings_markup,
+    # New imports for Settings, Progress, Thanks, Feelings
+    build_main_settings_markup,
+    build_language_settings_markup,
+    build_step_settings_markup,
+    build_profile_settings_markup,
+    build_about_me_sections_markup,
+    build_about_section_actions_markup,
+    build_progress_step_markup,
+    build_progress_questions_markup,
+    build_progress_steps_list_markup,
+    build_thanks_menu_markup,
+    build_thanks_history_markup,
+    build_feelings_categories_markup,
+    build_feelings_list_markup,
+    build_all_feelings_markup,
+    build_feelings_category_markup,
+    build_fears_markup,
+    format_feelings_table_text,
+    FEELINGS_CATEGORIES,
+    FEARS_LIST
 )
 from bot.utils import split_long_message, send_long_message, edit_long_message
 from bot.onboarding import OnboardingStates, register_onboarding_handlers
@@ -75,6 +95,15 @@ class SosStates(StatesGroup):
 class Step10States(StatesGroup):
     answering_question = State()  # User is answering a step10 question
 
+
+class ThanksStates(StatesGroup):
+    adding_entry = State()  # User is adding a gratitude entry
+
+
+class AboutMeStates(StatesGroup):
+    adding_entry = State()  # User is adding an entry to an about section
+
+
 # ---------------------------------------------------------
 # REGISTER HANDLERS
 # ---------------------------------------------------------
@@ -96,8 +125,8 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message(F.text == "🪜 Работа по шагу")(handle_steps)
     dp.message(F.text == "📖 Самоанализ")(handle_day)
     dp.message(F.text == "📘 Чувства")(handle_feelings)
-    dp.message(F.text == "🙏 Благодарности")(handle_thanks)
-    dp.message(F.text == "⚙️ Настройки")(handle_steps_settings)
+    dp.message(F.text == "🙏 Благодарности")(handle_thanks_menu)
+    dp.message(F.text == "⚙️ Настройки")(handle_main_settings)
     dp.message(F.text == "📎 Инструкция")(handle_faq)
 
     # 2. Onboarding Flow
@@ -139,6 +168,25 @@ def register_handlers(dp: Dispatcher) -> None:
     
     # 4.8. Steps Settings Flow
     dp.callback_query(F.data.startswith("settings_"))(handle_steps_settings_callback)
+    
+    # 4.9. Main Settings Flow (main_settings_ prefix)
+    dp.callback_query(F.data.startswith("main_settings_"))(handle_main_settings_callback)
+    dp.callback_query(F.data.startswith("lang_"))(handle_language_callback)
+    dp.callback_query(F.data.startswith("step_settings_"))(handle_step_settings_callback)
+    dp.callback_query(F.data.startswith("profile_settings_"))(handle_profile_settings_callback)
+    dp.callback_query(F.data.startswith("about_"))(handle_about_callback)
+    dp.message(StateFilter(AboutMeStates.adding_entry))(handle_about_entry_input)
+    
+    # 4.10. Progress Flow
+    dp.callback_query(F.data.startswith("progress_"))(handle_progress_callback)
+    
+    # 4.11. Thanks/Gratitude Flow
+    dp.callback_query(F.data.startswith("thanks_"))(handle_thanks_callback)
+    dp.message(StateFilter(ThanksStates.adding_entry))(handle_thanks_entry_input)
+    
+    # 4.12. Feelings Flow
+    dp.callback_query(F.data.startswith("feelings_"))(handle_feelings_callback)
+    dp.callback_query(F.data.startswith("feeling_"))(handle_feeling_selection_callback)
 
     # 4. QA / Debug Commands
     dp.message(Command(commands=["qa_last"]))(qa_last)
@@ -1060,14 +1108,85 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 # ---------------------------------------------------------
 
 async def handle_feelings(message: Message, state: FSMContext) -> None:
-    """Handle Feelings button - show feelings table/selector"""
-    feelings_text = (
-        "📘 Чувства\n\n"
-        "Таблица чувств поможет тебе лучше понять и назвать свои эмоции.\n\n"
-        "Используй её при заполнении шаблона, особенно в блоке \"Чувства до / после\".\n\n"
-        "Не обязательно выбирать «правильно» — просто найди то, что ближе всего к тому, как ты ощущаешь."
-    )
-    await message.answer(feelings_text, reply_markup=build_main_menu_markup())
+    """Handle Feelings button - show feelings table with categories"""
+    # Show the full feelings table as text
+    feelings_text = format_feelings_table_text()
+    feelings_text += "\n\n💡 Нажми на категорию, чтобы выбрать конкретное чувство."
+    
+    await send_long_message(message, feelings_text, reply_markup=build_all_feelings_markup())
+
+
+async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle feelings navigation callbacks"""
+    data = callback.data
+    
+    if data == "feelings_back":
+        # Return to main menu
+        await callback.message.delete()
+        await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+        await callback.answer()
+        return
+    
+    if data == "feelings_categories":
+        # Show all categories
+        feelings_text = format_feelings_table_text()
+        feelings_text += "\n\n💡 Нажми на категорию, чтобы выбрать конкретное чувство."
+        
+        await edit_long_message(callback, feelings_text, reply_markup=build_all_feelings_markup())
+        await callback.answer()
+        return
+    
+    if data.startswith("feelings_cat_"):
+        category = data.replace("feelings_cat_", "")
+        
+        # Find the full category name
+        full_category = None
+        for cat_name in FEELINGS_CATEGORIES.keys():
+            if cat_name == category or category in cat_name:
+                full_category = cat_name
+                break
+        
+        if full_category:
+            feelings = FEELINGS_CATEGORIES.get(full_category, [])
+            feelings_list = ", ".join(feelings)
+            
+            await callback.message.edit_text(
+                f"{full_category}\n\n{feelings_list}\n\n"
+                "💡 Нажми на чувство, чтобы скопировать:",
+                reply_markup=build_feelings_category_markup(full_category)
+            )
+        await callback.answer()
+        return
+    
+    if data == "feelings_fears":
+        # Show fears list
+        fears_text = "⚠️ СТРАХИ\n\n" + "\n".join([f"• {fear}" for fear in FEARS_LIST])
+        fears_text += "\n\n💡 Нажми на страх, чтобы скопировать:"
+        
+        await callback.message.edit_text(fears_text, reply_markup=build_fears_markup())
+        await callback.answer()
+        return
+    
+    if data == "feelings_noop":
+        # Category header clicked - do nothing
+        await callback.answer()
+        return
+    
+    await callback.answer()
+
+
+async def handle_feeling_selection_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle feeling selection - show the feeling for copying"""
+    data = callback.data
+    
+    if data.startswith("feeling_copy_") or data.startswith("feeling_select_"):
+        feeling = data.replace("feeling_copy_", "").replace("feeling_select_", "")
+        
+        # Show the feeling so user can copy it
+        await callback.answer(f"💡 {feeling}", show_alert=True)
+        return
+    
+    await callback.answer()
 
 
 # ---------------------------------------------------------
@@ -1136,6 +1255,515 @@ async def handle_faq(message: Message, state: FSMContext) -> None:
         "Это твоя карта движения. Показывает, где ты, что уже пройдено, что осталось."
     )
     await send_long_message(message, faq_text, reply_markup=build_main_menu_markup())
+
+
+# ---------------------------------------------------------
+# MAIN SETTINGS HANDLERS
+# ---------------------------------------------------------
+
+async def handle_main_settings(message: Message, state: FSMContext) -> None:
+    """Handle main settings button - show settings menu"""
+    settings_text = (
+        "⚙️ Настройки\n\n"
+        "Выбери раздел настроек:"
+    )
+    await message.answer(settings_text, reply_markup=build_main_settings_markup())
+
+
+async def handle_main_settings_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle main settings callbacks"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    if data == "main_settings_back":
+        # Return to main menu
+        await callback.message.delete()
+        await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+        await callback.answer()
+        return
+    
+    if data == "main_settings_reminders":
+        # Show reminders settings
+        await callback.message.edit_text(
+            "🔔 Напоминания\n\n"
+            "Настрой напоминания для регулярной практики.",
+            reply_markup=build_reminders_settings_markup(reminders_enabled=False)
+        )
+        await callback.answer()
+        return
+    
+    if data == "main_settings_language":
+        # Show language settings
+        await callback.message.edit_text(
+            "🌐 Язык интерфейса\n\n"
+            "Выбери язык:",
+            reply_markup=build_language_settings_markup("ru")
+        )
+        await callback.answer()
+        return
+    
+    if data == "main_settings_profile":
+        # Show profile settings
+        await callback.message.edit_text(
+            "🪪 Мой профиль\n\n"
+            "Настройки профиля:",
+            reply_markup=build_profile_settings_markup()
+        )
+        await callback.answer()
+        return
+    
+    if data == "main_settings_steps":
+        # Show step settings
+        await callback.message.edit_text(
+            "🔧 Настройки по шагу\n\n"
+            "Выбери действие:",
+            reply_markup=build_step_settings_markup()
+        )
+        await callback.answer()
+        return
+    
+    await callback.answer()
+
+
+async def handle_language_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle language selection"""
+    data = callback.data
+    
+    if data == "lang_ru":
+        await callback.message.edit_text(
+            "🌐 Язык интерфейса\n\n"
+            "✅ Выбран русский язык.",
+            reply_markup=build_language_settings_markup("ru")
+        )
+        await callback.answer("Выбран русский язык")
+        return
+    
+    if data == "lang_en":
+        await callback.message.edit_text(
+            "🌐 Interface Language\n\n"
+            "✅ English selected.\n\n"
+            "(English interface coming soon)",
+            reply_markup=build_language_settings_markup("en")
+        )
+        await callback.answer("English selected (coming soon)")
+        return
+    
+    await callback.answer()
+
+
+async def handle_step_settings_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle step-specific settings callbacks"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    if data == "step_settings_restart":
+        # Restart current step
+        await callback.message.edit_text(
+            "🔁 Начать заново текущий шаг\n\n"
+            "Это очистит все ответы по текущему шагу.\n"
+            "Вы уверены?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да, начать заново", callback_data="step_settings_restart_confirm")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="main_settings_steps")]
+            ])
+        )
+        await callback.answer()
+        return
+    
+    if data == "step_settings_restart_confirm":
+        # TODO: Implement step restart via backend
+        await callback.message.edit_text(
+            "✅ Текущий шаг будет перезапущен.\n\n"
+            "(Функция в разработке)",
+            reply_markup=build_step_settings_markup()
+        )
+        await callback.answer("Функция в разработке")
+        return
+    
+    if data == "step_settings_custom_template":
+        # Go to template customization
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                templates_data = await BACKEND_CLIENT.get_templates(token)
+                templates = templates_data.get("templates", []) if templates_data else []
+                current_template_id = templates_data.get("active_template_id") if templates_data else None
+                
+                await callback.message.edit_text(
+                    "✏️ Настроить шаблон\n\n"
+                    "Выбери шаблон для работы:",
+                    reply_markup=build_template_selection_settings_markup(templates, current_template_id)
+                )
+        except Exception as e:
+            logger.exception("Error loading templates: %s", e)
+            await callback.answer("Ошибка загрузки шаблонов")
+        await callback.answer()
+        return
+    
+    await callback.answer()
+
+
+async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle profile settings callbacks"""
+    data = callback.data
+    
+    if data == "profile_settings_back":
+        # Back to main settings
+        await callback.message.edit_text(
+            "⚙️ Настройки\n\n"
+            "Выбери раздел настроек:",
+            reply_markup=build_main_settings_markup()
+        )
+        await callback.answer()
+        return
+    
+    if data == "profile_settings_about":
+        # Show about me sections
+        await callback.message.edit_text(
+            "✍️ Рассказать о себе\n\n"
+            "Чем больше ты расскажешь, тем лучше GPT поможет тебе.\n\n"
+            "Выбери раздел:",
+            reply_markup=build_about_me_sections_markup()
+        )
+        await callback.answer()
+        return
+    
+    if data == "profile_settings_goals":
+        await callback.answer("🧭 Цели и мотивации — скоро!", show_alert=True)
+        return
+    
+    if data == "profile_settings_history":
+        await callback.answer("📈 История шагов — скоро!", show_alert=True)
+        return
+    
+    await callback.answer()
+
+
+async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle about me section callbacks"""
+    data = callback.data
+    
+    # Section names mapping
+    section_names = {
+        "about_family": "🏠 Семья",
+        "about_friends": "🧑‍🤝‍🧑 Друзья",
+        "about_education": "🎓 Учёба",
+        "about_childhood": "🧒 Детство",
+        "about_hobby": "🎨 Хобби",
+        "about_work": "💼 Работа / Дело",
+        "about_support": "🙌 Поддержка рядом",
+        "about_routine": "🕒 Режим и быт",
+        "about_values": "🧭 Ценности и правила",
+        "about_boundaries": "🛑 Границы",
+        "about_strengths": "💪 Сильные стороны",
+        "about_health": "🩺 Здоровье",
+        "about_free": "📜 Свободный рассказ",
+        "about_custom": "➕ Добавить свой блок"
+    }
+    
+    # Handle section selection
+    for section_id, section_name in section_names.items():
+        if data == section_id:
+            # Store current section in state
+            await state.update_data(about_section=section_id)
+            
+            await callback.message.edit_text(
+                f"{section_name}\n\n"
+                "Здесь ты можешь добавить информацию о себе.\n"
+                "Выбери действие:",
+                reply_markup=build_about_section_actions_markup(section_id.replace("about_", ""))
+            )
+            await callback.answer()
+            return
+    
+    # Handle add entry
+    if data.startswith("about_add_"):
+        section = data.replace("about_add_", "")
+        section_name = section_names.get(f"about_{section}", section)
+        
+        await state.update_data(about_section=f"about_{section}")
+        await state.set_state(AboutMeStates.adding_entry)
+        
+        await callback.message.edit_text(
+            f"{section_name}\n\n"
+            "Напиши то, что хочешь добавить:"
+        )
+        await callback.answer()
+        return
+    
+    # Handle view history
+    if data.startswith("about_history_"):
+        section = data.replace("about_history_", "")
+        # TODO: Load history from backend
+        await callback.message.edit_text(
+            f"🗃️ История записей\n\n"
+            "(История пока пуста или функция в разработке)",
+            reply_markup=build_about_section_actions_markup(section)
+        )
+        await callback.answer()
+        return
+    
+    await callback.answer()
+
+
+async def handle_about_entry_input(message: Message, state: FSMContext) -> None:
+    """Handle input for about me section entry"""
+    text = message.text
+    data = await state.get_data()
+    section = data.get("about_section", "about_free")
+    
+    # TODO: Save to backend
+    await state.clear()
+    
+    await message.answer(
+        f"✅ Записано!\n\n"
+        f"Твоя информация сохранена.",
+        reply_markup=build_main_menu_markup()
+    )
+
+
+# ---------------------------------------------------------
+# THANKS/GRATITUDE HANDLERS
+# ---------------------------------------------------------
+
+async def handle_thanks_menu(message: Message, state: FSMContext) -> None:
+    """Handle gratitude button - show gratitude menu"""
+    thanks_text = (
+        "🙏 Благодарности\n\n"
+        "Благодарность помогает переключить мышление и снизить тревогу.\n\n"
+        "Записывай за что ты благодарен — это может быть что угодно: "
+        "тёплый день, вкусный завтрак, разговор с другом.\n\n"
+        "Только ты видишь свои записи."
+    )
+    await message.answer(thanks_text, reply_markup=build_thanks_menu_markup())
+
+
+async def handle_thanks_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle thanks/gratitude callbacks"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    
+    if data == "thanks_back":
+        # Return to main menu
+        await callback.message.delete()
+        await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+        await callback.answer()
+        return
+    
+    if data == "thanks_menu":
+        # Return to thanks menu
+        await callback.message.edit_text(
+            "🙏 Благодарности\n\n"
+            "Благодарность помогает переключить мышление и снизить тревогу.\n\n"
+            "Записывай за что ты благодарен — это может быть что угодно.",
+            reply_markup=build_thanks_menu_markup()
+        )
+        await callback.answer()
+        return
+    
+    if data == "thanks_add":
+        # Start adding gratitude entry
+        await state.set_state(ThanksStates.adding_entry)
+        await callback.message.edit_text(
+            "🙏 Добавить благодарность\n\n"
+            "Напиши за что ты сегодня благодарен.\n\n"
+            "Можно написать 3-4 вещи через запятую или отдельными строками."
+        )
+        await callback.answer()
+        return
+    
+    if data == "thanks_history":
+        # Show history
+        # TODO: Load from backend
+        await callback.message.edit_text(
+            "🗃️ История благодарностей\n\n"
+            "Пока записей нет. Добавь свою первую благодарность!",
+            reply_markup=build_thanks_history_markup()
+        )
+        await callback.answer()
+        return
+    
+    if data.startswith("thanks_page_"):
+        page = int(data.replace("thanks_page_", ""))
+        # TODO: Load page from backend
+        await callback.answer(f"Страница {page}")
+        return
+    
+    await callback.answer()
+
+
+async def handle_thanks_entry_input(message: Message, state: FSMContext) -> None:
+    """Handle input for gratitude entry"""
+    telegram_id = message.from_user.id
+    text = message.text
+    
+    # TODO: Save to backend
+    await state.clear()
+    
+    # Get motivational response from backend
+    try:
+        backend_reply = await BACKEND_CLIENT.thanks(telegram_id=telegram_id, debug=False)
+        reply_text = backend_reply.reply if backend_reply else "Благодарность сохранена! 🙏"
+    except Exception:
+        reply_text = "✅ Благодарность записана! 🙏\n\nПродолжай в том же духе!"
+    
+    await send_long_message(
+        message, 
+        f"✅ Сохранено!\n\n{text}\n\n{reply_text}",
+        reply_markup=build_thanks_menu_markup()
+    )
+
+
+# ---------------------------------------------------------
+# PROGRESS HANDLERS
+# ---------------------------------------------------------
+
+async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle progress view callbacks"""
+    data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
+    
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await callback.answer("Ошибка авторизации")
+            return
+    except Exception as e:
+        logger.exception("Error getting token: %s", e)
+        await callback.answer("Ошибка авторизации")
+        return
+    
+    if data == "progress_steps_list":
+        # Show list of all steps with progress
+        try:
+            steps_list = await BACKEND_CLIENT.get_steps_list(token)
+            steps = steps_list.get("steps", []) if steps_list else []
+            
+            await callback.message.edit_text(
+                "📋 Мой прогресс\n\n"
+                "Выбери шаг для просмотра:",
+                reply_markup=build_progress_steps_list_markup(steps)
+            )
+        except Exception as e:
+            logger.exception("Error loading steps: %s", e)
+            await callback.answer("Ошибка загрузки")
+        await callback.answer()
+        return
+    
+    if data.startswith("progress_step_"):
+        step_id = int(data.replace("progress_step_", ""))
+        
+        try:
+            # Get step info with questions
+            questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+            questions = questions_data.get("questions", []) if questions_data else []
+            step_info = questions_data.get("step", {}) if questions_data else {}
+            
+            step_number = step_info.get("number", step_id)
+            step_title = step_info.get("title", "")
+            answered = sum(1 for q in questions if q.get("status") == "COMPLETED")
+            total = len(questions)
+            
+            # Build progress text
+            progress_text = f"🪜 Шаг {step_number} — {step_title}\n"
+            progress_text += f"Пройдено: {answered} из {total}\n\n"
+            
+            for i, q in enumerate(questions, 1):
+                q_text = q.get("text", "")[:40]
+                status = q.get("status", "")
+                answer_preview = q.get("answer_preview", "")
+                
+                if status == "COMPLETED":
+                    progress_text += f"✅ {i}. {q_text}...\n"
+                    if answer_preview:
+                        progress_text += f"   Ответ: \"{answer_preview[:50]}...\"\n"
+                elif answer_preview:
+                    progress_text += f"⏳ {i}. {q_text}...\n"
+                    progress_text += f"   (черновик сохранён)\n"
+                else:
+                    progress_text += f"⬜ {i}. {q_text}...\n"
+                progress_text += "\n"
+            
+            await callback.message.edit_text(
+                progress_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🗂 Выбрать вопрос", callback_data=f"progress_questions_{step_id}")],
+                    [InlineKeyboardButton(text="▶️ Продолжить работу", callback_data="steps_continue")],
+                    [InlineKeyboardButton(text="◀️ Назад к списку шагов", callback_data="progress_steps_list")]
+                ])
+            )
+        except Exception as e:
+            logger.exception("Error loading step progress: %s", e)
+            await callback.answer("Ошибка загрузки")
+        await callback.answer()
+        return
+    
+    if data.startswith("progress_questions_"):
+        step_id = int(data.replace("progress_questions_", ""))
+        
+        try:
+            # Get questions for selection
+            questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+            questions = questions_data.get("questions", []) if questions_data else []
+            
+            await callback.message.edit_text(
+                "🗂 Выбери вопрос:\n\n"
+                "Нажми на вопрос, чтобы начать работу с ним.",
+                reply_markup=build_progress_questions_markup(questions, step_id)
+            )
+        except Exception as e:
+            logger.exception("Error loading questions: %s", e)
+            await callback.answer("Ошибка загрузки")
+        await callback.answer()
+        return
+    
+    if data.startswith("progress_select_q_"):
+        question_id = int(data.replace("progress_select_q_", ""))
+        
+        try:
+            # Switch to this question
+            result = await BACKEND_CLIENT.switch_to_question(token, question_id)
+            if result:
+                # Get the question and show it
+                step_data = await get_current_step_question(telegram_id, username, first_name)
+                if step_data:
+                    response_text = step_data.get("message", "")
+                    step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                    
+                    if step_info:
+                        progress_indicator = format_step_progress_indicator(
+                            step_number=step_info.get("step_number", 0),
+                            total_steps=step_info.get("total_steps", 12),
+                            step_title=step_info.get("step_title"),
+                            answered_questions=step_info.get("answered_questions", 0),
+                            total_questions=step_info.get("total_questions", 0)
+                        )
+                        full_text = f"{progress_indicator}\n\n{response_text}"
+                    else:
+                        full_text = response_text
+                    
+                    await callback.message.edit_text(
+                        full_text,
+                        reply_markup=build_step_actions_markup()
+                    )
+                    await state.set_state(StepState.answering)
+                else:
+                    await callback.answer("Ошибка загрузки вопроса")
+            else:
+                await callback.answer("Не удалось переключиться на вопрос")
+        except Exception as e:
+            logger.exception("Error selecting question: %s", e)
+            await callback.answer("Ошибка")
+        await callback.answer()
+        return
+    
+    await callback.answer()
 
 
 # ---------------------------------------------------------
@@ -2136,13 +2764,7 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             return
         
         elif data == "step_progress":
-            # Show my progress
-            step_info = await BACKEND_CLIENT.get_current_step_info(token)
-            if not step_info:
-                await callback.answer("Не удалось получить информацию о шаге")
-                return
-            
-            # Get all steps progress
+            # Show my progress - improved version with steps list
             steps_list = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_list.get("steps", []) if steps_list else []
             
@@ -2156,18 +2778,13 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 
                 if answered > 0 or step.get("status") == "IN_PROGRESS":
                     progress_text += f"🪜 Шаг {step_number} — {step_title} ({answered} / {total})\n"
-            
-            progress_text += "\n🔁 Сменить текущий шаг"
-            
-            buttons = [
-                [InlineKeyboardButton(text="🔁 Сменить текущий шаг", callback_data="steps_select")],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")]
-            ]
+                else:
+                    progress_text += f"⬜ Шаг {step_number} — {step_title} (0 / {total})\n"
             
             await edit_long_message(
                 callback,
                 progress_text,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                reply_markup=build_progress_steps_list_markup(steps)
             )
             await callback.answer()
             return
