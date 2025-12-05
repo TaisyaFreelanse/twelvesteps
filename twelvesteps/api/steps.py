@@ -148,7 +148,17 @@ class StepFlowService:
         return None
     
     async def switch_to_question(self, user_id: int, question_id: int) -> Optional[str]:
-        """Switch to a specific question in current step"""
+        """Switch to a specific question, also switching step if needed"""
+        # First, get the question to find which step it belongs to
+        stmt_question = select(Question).where(Question.id == question_id)
+        result_q = await self.session.execute(stmt_question)
+        question = result_q.scalars().first()
+        
+        if not question:
+            return None
+        
+        target_step_id = question.step_id
+        
         # Get current step
         stmt_user_step = select(UserStep).where(
             UserStep.user_id == user_id,
@@ -157,19 +167,32 @@ class StepFlowService:
         result = await self.session.execute(stmt_user_step)
         current_user_step = result.scalars().first()
         
-        if not current_user_step:
-            return None
-        
-        # Check if question belongs to current step
-        stmt_question = select(Question).where(
-            Question.id == question_id,
-            Question.step_id == current_user_step.step_id
-        )
-        result_q = await self.session.execute(stmt_question)
-        question = result_q.scalars().first()
-        
-        if not question:
-            return None
+        # If question is in a different step, we need to switch steps
+        if not current_user_step or current_user_step.step_id != target_step_id:
+            # Close current step if exists (mark as not started to pause it)
+            if current_user_step:
+                current_user_step.status = StepProgressStatus.NOT_STARTED
+            
+            # Check if user already has a record for target step
+            stmt_target_step = select(UserStep).where(
+                UserStep.user_id == user_id,
+                UserStep.step_id == target_step_id
+            )
+            result_target = await self.session.execute(stmt_target_step)
+            target_user_step = result_target.scalars().first()
+            
+            if target_user_step:
+                # Reactivate existing user step
+                target_user_step.status = StepProgressStatus.IN_PROGRESS
+            else:
+                # Create new user step
+                target_user_step = UserStep(
+                    user_id=user_id,
+                    step_id=target_step_id,
+                    status=StepProgressStatus.IN_PROGRESS,
+                    started_at=datetime.now()
+                )
+                self.session.add(target_user_step)
         
         # Close current tail if exists
         stmt_tail = select(Tail).where(
@@ -188,7 +211,7 @@ class StepFlowService:
         new_tail = Tail(
             user_id=user_id,
             tail_type=TailType.STEP_QUESTION,
-            step_id=current_user_step.step_id,
+            step_id=target_step_id,
             step_question_id=question_id,
             is_closed=False,
             payload={}
