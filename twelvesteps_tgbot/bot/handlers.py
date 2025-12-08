@@ -302,14 +302,11 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
                     except Exception as e:
                         logger.warning(f"Failed to check template progress: {e}")
                     
-                    # Build status header
-                    status_header = f"📍 Ты сейчас на:\n{progress_indicator}\n"
+                    # Build compact status header
+                    full_text = f"{progress_indicator}\n\n❔{response_text}"
                     
                     if template_progress:
-                        status_header += f"\n⏸ Есть сохранённый прогресс по шаблону\n"
-                        status_header += f"📊 {template_progress.get('progress_summary', '')}\n"
-                    
-                    status_header += "\n" + "─" * 30 + "\n"
+                        full_text = f"{progress_indicator}\n\n⏸ Есть сохранённый прогресс по шаблону\n📊 {template_progress.get('progress_summary', '')}\n\n❔{response_text}"
                     
                     # Save session context for STEPS
                     context_data = {
@@ -326,17 +323,13 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
                     except Exception as e:
                         logger.warning(f"Failed to save session context: {e}")
                     
-                    # Show current step info with status header
-                    step_description = step_info.get("step_description", "")
-                    full_text = status_header
-                    if step_description:
-                        full_text += f"\n{step_description}\n"
-                    full_text += f"\n{response_text}"
+                    # Store step description in state for toggle
+                    await state.update_data(step_description=step_info.get("step_description", ""))
                     
                     await send_long_message(
                         message,
                         full_text,
-                        reply_markup=build_step_actions_markup(has_template_progress=bool(template_progress))
+                        reply_markup=build_step_actions_markup(has_template_progress=bool(template_progress), show_description=False)
                     )
                     # Set the state to 'answering' so the next message goes to handle_step_answer
                     await state.set_state(StepState.answering)
@@ -468,11 +461,14 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
                 answered_questions=step_info.get("answered_questions", 0),
                 total_questions=step_info.get("total_questions", 0)
             )
-            full_response = f"{progress_indicator}\n\n✅ Ответ сохранён!\n\n{response_text}"
+            full_response = f"{progress_indicator}\n\n✅ Ответ сохранён!\n\n❔{response_text}"
+            
+            # Store step description in state
+            await state.update_data(step_description=step_info.get("step_description", ""))
         else:
-            full_response = f"✅ Ответ сохранён!\n\n{response_text}"
+            full_response = f"✅ Ответ сохранён!\n\n❔{response_text}"
 
-        await send_long_message(message, full_response, reply_markup=build_step_actions_markup())
+        await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
 
         if is_completed:
              await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
@@ -869,6 +865,49 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
         token = await get_or_fetch_token(telegram_id, username, first_name)
         if not token:
             await safe_answer_callback(callback, "Ошибка авторизации. Нажми /start.")
+            return
+        
+        if data == "sos_back":
+            # Return to previous screen (step work or main menu)
+            state_data = await state.get_data()
+            previous_state = state_data.get("previous_state")
+            current_state = await state.get_state()
+            
+            # Check if we were in step answering mode or currently in step answering
+            if previous_state == StepState.answering or current_state == StepState.answering or str(previous_state) == str(StepState.answering):
+                # Return to step work
+                step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                if step_info:
+                    step_data = await get_current_step_question(telegram_id, username, first_name)
+                    if step_data:
+                        response_text = step_data.get("message", "")
+                        if response_text:
+                            progress_indicator = format_step_progress_indicator(
+                                step_number=step_info.get("step_number"),
+                                total_steps=step_info.get("total_steps", 12),
+                                step_title=step_info.get("step_title"),
+                                answered_questions=step_info.get("answered_questions", 0),
+                                total_questions=step_info.get("total_questions", 0)
+                            )
+                            full_text = f"{progress_indicator}\n\n{response_text}"
+                            await edit_long_message(
+                                callback,
+                                full_text,
+                                reply_markup=build_step_actions_markup()
+                            )
+                            await state.set_state(StepState.answering)
+                            await safe_answer_callback(callback)
+                            return
+            
+            # Default: return to main menu
+            await state.clear()
+            await edit_long_message(
+                callback,
+                "Главное меню:",
+                reply_markup=None
+            )
+            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+            await safe_answer_callback(callback)
             return
         
         if data == "sos_cancel":
@@ -1297,12 +1336,32 @@ async def handle_main_settings_callback(callback: CallbackQuery, state: FSMConte
         return
     
     if data == "main_settings_steps":
-        # Show step settings
-        await callback.message.edit_text(
-            "🔧 Настройки по шагу\n\n"
-            "Выбери действие:",
-            reply_markup=build_step_settings_markup()
-        )
+        # Show steps settings (templates and reminders)
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if not token:
+                await callback.answer("Ошибка авторизации")
+                return
+            
+            # Get current settings
+            settings = await BACKEND_CLIENT.get_steps_settings(token)
+            active_template_name = settings.get("active_template_name", "Не выбран")
+            reminders_enabled = settings.get("reminders_enabled", False)
+            
+            settings_text = (
+                "⚙️ Настройки работы по шагу\n\n"
+                f"⚙️ Активный шаблон: {active_template_name}\n"
+                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                "Выбери настройку для изменения:"
+            )
+            
+            await callback.message.edit_text(
+                settings_text,
+                reply_markup=build_steps_settings_markup()
+            )
+        except Exception as e:
+            logger.exception("Error loading steps settings: %s", e)
+            await callback.answer("Ошибка загрузки настроек")
         await callback.answer()
         return
     
@@ -1787,13 +1846,16 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
                             answered_questions=step_info.get("answered_questions", 0),
                             total_questions=step_info.get("total_questions", 0)
                         )
-                        full_text = f"{progress_indicator}\n\n{response_text}"
+                        full_text = f"{progress_indicator}\n\n❔{response_text}"
                     else:
-                        full_text = response_text
+                        full_text = f"❔{response_text}"
+                    
+                    # Store step description in state
+                    await state.update_data(step_description=step_info.get("step_description", "") if step_info else "")
                     
                     await callback.message.edit_text(
                         full_text,
-                        reply_markup=build_step_actions_markup()
+                        reply_markup=build_step_actions_markup(show_description=False)
                     )
                     await state.set_state(StepState.answering)
                 else:
@@ -2584,22 +2646,11 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
             return
         
         if data == "settings_back":
-            # Return to settings main menu
-            settings = await BACKEND_CLIENT.get_steps_settings(token)
-            active_template_name = settings.get("active_template_name", "Не выбран")
-            reminders_enabled = settings.get("reminders_enabled", False)
-            
-            settings_text = (
-                "⚙️ Настройки работы по шагу\n\n"
-                f"🧩 Активный шаблон: {active_template_name}\n"
-                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
-                "Выбери настройку для изменения:"
-            )
-            
-            await edit_long_message(
-                callback,
-                settings_text,
-                reply_markup=build_steps_settings_markup()
+            # Return to main settings menu
+            await callback.message.edit_text(
+                "⚙️ Настройки\n\n"
+                "Выбери раздел настроек:",
+                reply_markup=build_main_settings_markup()
             )
             await callback.answer()
             return
@@ -2618,23 +2669,57 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
                 )
             else:
                 await callback.answer("Шаблоны не найдены")
+            await callback.answer()
+            return
+        
+        if data == "settings_template_back":
+            # Return to steps settings from template selection
+            settings = await BACKEND_CLIENT.get_steps_settings(token)
+            active_template_name = settings.get("active_template_name", "Не выбран")
+            reminders_enabled = settings.get("reminders_enabled", False)
+            
+            settings_text = (
+                "⚙️ Настройки работы по шагу\n\n"
+                f"⚙️ Активный шаблон: {active_template_name}\n"
+                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                "Выбери настройку для изменения:"
+            )
+            
+            await edit_long_message(
+                callback,
+                settings_text,
+                reply_markup=build_steps_settings_markup()
+            )
+            await callback.answer()
             return
         
         if data.startswith("settings_select_template_"):
             # Select template
             template_id = int(data.split("_")[-1])
             
+            # Get template name before updating
+            templates_data = await BACKEND_CLIENT.get_templates(token)
+            templates = templates_data.get("templates", [])
+            selected_template = next((t for t in templates if t.get("id") == template_id), None)
+            template_name = selected_template.get("name", "Неизвестно") if selected_template else "Неизвестно"
+            
             # Update settings
             await BACKEND_CLIENT.update_steps_settings(token, active_template_id=template_id)
             
-            # Get updated settings
+            # Get updated settings (only for reminders status)
             settings = await BACKEND_CLIENT.get_steps_settings(token)
-            active_template_name = settings.get("active_template_name", "Не выбран")
+            reminders_enabled = settings.get("reminders_enabled", False)
+            
+            settings_text = (
+                "⚙️ Настройки работы по шагу\n\n"
+                f"⚙️ Активный шаблон: {template_name}\n"
+                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                "Выбери настройку для изменения:"
+            )
             
             await edit_long_message(
                 callback,
-                f"✅ Шаблон изменён на: {active_template_name}\n\n"
-                "⚙️ Настройки работы по шагу",
+                settings_text,
                 reply_markup=build_steps_settings_markup()
             )
             await callback.answer("Шаблон изменён")
@@ -2654,10 +2739,21 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
             
             if author_template:
                 await BACKEND_CLIENT.update_steps_settings(token, active_template_id=author_template.get("id"))
+                
+                # Get updated settings (only for reminders status)
+                settings = await BACKEND_CLIENT.get_steps_settings(token)
+                reminders_enabled = settings.get("reminders_enabled", False)
+                
+                settings_text = (
+                    "⚙️ Настройки работы по шагу\n\n"
+                    f"⚙️ Активный шаблон: {author_template.get('name')}\n"
+                    f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                    "Выбери настройку для изменения:"
+                )
+                
                 await edit_long_message(
                     callback,
-                    f"✅ Сброшено на авторский шаблон: {author_template.get('name')}\n\n"
-                    "⚙️ Настройки работы по шагу",
+                    settings_text,
                     reply_markup=build_steps_settings_markup()
                 )
                 await callback.answer("Сброшено на авторский шаблон")
@@ -2680,7 +2776,7 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
                         text=f"✏️ {template.get('name')}",
                         callback_data=f"settings_edit_template_{template.get('id')}"
                     )])
-                buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")])
+                buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_edit_template_back")])
                 
                 await edit_long_message(
                     callback,
@@ -2693,9 +2789,30 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
                     "✏️ У тебя нет пользовательских шаблонов.\n\n"
                     "Создай свой шаблон через API или в настройках позже.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")]
+                        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_edit_template_back")]
                     ])
                 )
+            await callback.answer()
+            return
+        
+        if data == "settings_edit_template_back":
+            # Return to steps settings from edit template menu
+            settings = await BACKEND_CLIENT.get_steps_settings(token)
+            active_template_name = settings.get("active_template_name", "Не выбран")
+            reminders_enabled = settings.get("reminders_enabled", False)
+            
+            settings_text = (
+                "⚙️ Настройки работы по шагу\n\n"
+                f"⚙️ Активный шаблон: {active_template_name}\n"
+                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                "Выбери настройку для изменения:"
+            )
+            
+            await edit_long_message(
+                callback,
+                settings_text,
+                reply_markup=build_steps_settings_markup()
+            )
             await callback.answer()
             return
         
@@ -2703,6 +2820,27 @@ async def handle_steps_settings_callback(callback: CallbackQuery, state: FSMCont
             # Edit specific template (for now, just show info)
             template_id = int(data.split("_")[-1])
             await callback.answer("Редактирование шаблона будет реализовано позже")
+            return
+        
+        if data == "settings_reminders_back":
+            # Return to steps settings from reminders
+            settings = await BACKEND_CLIENT.get_steps_settings(token)
+            active_template_name = settings.get("active_template_name", "Не выбран")
+            reminders_enabled = settings.get("reminders_enabled", False)
+            
+            settings_text = (
+                "⚙️ Настройки работы по шагу\n\n"
+                f"⚙️ Активный шаблон: {active_template_name}\n"
+                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
+                "Выбери настройку для изменения:"
+            )
+            
+            await edit_long_message(
+                callback,
+                settings_text,
+                reply_markup=build_steps_settings_markup()
+            )
+            await callback.answer()
             return
         
         if data == "settings_reminders":
@@ -2796,14 +2934,67 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                         answered_questions=step_info.get("answered_questions", 0),
                         total_questions=step_info.get("total_questions", 0)
                     )
-                    full_text = f"{progress_indicator}\n\n{response_text}"
+                    full_text = f"{progress_indicator}\n\n❔{response_text}"
+                    
+                    # Store step description in state
+                    await state.update_data(step_description=step_info.get("step_description", ""))
+                    
                     await edit_long_message(
                         callback,
                         full_text,
-                        reply_markup=build_step_actions_markup()
+                        reply_markup=build_step_actions_markup(show_description=False)
                     )
                     await state.set_state(StepState.answering)
                     await callback.answer()
+            return
+        
+        if data == "step_toggle_description":
+            # Toggle step description visibility
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
+                return
+            
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if not step_data:
+                await callback.answer("Нет активного вопроса")
+                return
+            
+            response_text = step_data.get("message", "")
+            state_data = await state.get_data()
+            show_description = state_data.get("show_step_description", False)
+            step_description = step_info.get("step_description", "")
+            
+            progress_indicator = format_step_progress_indicator(
+                step_number=step_info.get("step_number"),
+                total_steps=step_info.get("total_steps", 12),
+                step_title=step_info.get("step_title"),
+                answered_questions=step_info.get("answered_questions", 0),
+                total_questions=step_info.get("total_questions", 0)
+            )
+            
+            if show_description:
+                # Hide description
+                full_text = f"{progress_indicator}\n\n❔{response_text}"
+                new_show_description = False
+            else:
+                # Show description
+                if step_description:
+                    full_text = f"{progress_indicator}\n\n📘 Шаг {step_info.get('step_number')} — {step_info.get('step_title', '')}\n\n{step_description}\n\n❔{response_text}"
+                else:
+                    full_text = f"{progress_indicator}\n\n❔{response_text}"
+                    await callback.answer("Описание шага пока не добавлено")
+                    return
+                new_show_description = True
+            
+            await state.update_data(show_step_description=new_show_description)
+            
+            await edit_long_message(
+                callback,
+                full_text,
+                reply_markup=build_step_actions_markup(show_description=new_show_description)
+            )
+            await callback.answer()
             return
         
         elif data == "step_progress":
@@ -3333,16 +3524,16 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
                 total_questions=step_info.get("total_questions", 0)
             )
             
-            full_text = progress_indicator
-            if step_description:
-                full_text += f"\n\n{step_description}"
-            full_text += f"\n\n{response_text}"
+            full_text = f"{progress_indicator}\n\n❔{response_text}"
+            
+            # Store step description in state
+            await state.update_data(step_description=step_description)
             
             try:
                 await edit_long_message(
                     callback,
                     full_text,
-                    reply_markup=build_step_actions_markup()
+                    reply_markup=build_step_actions_markup(show_description=False)
                 )
             except TelegramBadRequest as e:
                 # Handle "message is not modified" error
@@ -3354,7 +3545,7 @@ async def handle_step_selection_callback(callback: CallbackQuery, state: FSMCont
                     # Fallback: send new message
                     await callback.message.answer(
                         full_text,
-                        reply_markup=build_step_actions_markup()
+                        reply_markup=build_step_actions_markup(show_description=False)
                     )
             except Exception as edit_error:
                 logger.exception(f"Failed to edit message for step {step_id}: {edit_error}")

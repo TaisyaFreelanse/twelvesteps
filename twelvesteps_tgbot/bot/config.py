@@ -166,6 +166,7 @@ def build_sos_help_type_markup() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💭 Не понял вопрос", callback_data="sos_help_question")],
         [InlineKeyboardButton(text="🔍 Хочу примеры", callback_data="sos_help_examples")],
         [InlineKeyboardButton(text="🪫 Просто тяжело", callback_data="sos_help_support")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="sos_back")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="sos_cancel")]
     ])
 
@@ -249,28 +250,29 @@ def format_step_progress_indicator(
     total_questions: Optional[int] = None
 ) -> str:
     """
-    Format step progress indicator text.
-    Example: "📘 Шаг 3 из 12: Принятие решения\nВопрос 5 из 7 в этом шаге"
+    Format step progress indicator text in compact format.
+    Example: "📘 Ты сейчас на:\nШаг 2 — Здравомыслие\nВопрос 4 из 12"
     """
     from typing import Optional
     
-    indicator_parts = []
+    indicator_parts = ["📘 Ты сейчас на:"]
     
     # Step indicator
-    step_text = f"📘 Шаг {step_number} из {total_steps}"
+    step_text = f"Шаг {step_number}"
     if step_title:
-        step_text += f": {step_title}"
+        step_text += f" — {step_title}"
     indicator_parts.append(step_text)
     
     # Question progress indicator
     if answered_questions is not None and total_questions is not None and total_questions > 0:
-        question_text = f"Вопрос {answered_questions + 1} из {total_questions} в этом шаге"
+        current_question = answered_questions + 1
+        question_text = f"Вопрос {current_question} из {total_questions}"
         indicator_parts.append(question_text)
     
     return "\n".join(indicator_parts)
 
 
-def build_step_actions_markup(has_template_progress: bool = False) -> InlineKeyboardMarkup:
+def build_step_actions_markup(has_template_progress: bool = False, show_description: bool = False) -> InlineKeyboardMarkup:
     """Markup for step actions during answering."""
     buttons = []
     
@@ -280,14 +282,25 @@ def build_step_actions_markup(has_template_progress: bool = False) -> InlineKeyb
         InlineKeyboardButton(text="📋 Мой прогресс", callback_data="step_progress")
     ])
     
-    # Second row: Помощь and Сохранить
+    # Second row: Сохранить and Описание шага
     buttons.append([
-        InlineKeyboardButton(text="🧭 Помощь", callback_data="sos_help"),
-        InlineKeyboardButton(text="⏸ Сохранить", callback_data="step_pause")
+        InlineKeyboardButton(text="⏸ Сохранить", callback_data="step_pause"),
+        InlineKeyboardButton(
+            text="🔽 Свернуть описание" if show_description else "🧾 Описание шага",
+            callback_data="step_toggle_description"
+        )
     ])
     
-    # Third row: Назад
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
+    # Third row: Назад and Помощь
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back"),
+        InlineKeyboardButton(text="🧭 Помощь", callback_data="sos_help")
+    ])
+    
+    # Fourth row: Ответить по шаблону (if no template progress in progress) - hidden by default
+    if not has_template_progress:
+        # Можно добавить в настройки или показать через длинное нажатие
+        pass
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -345,7 +358,7 @@ def build_template_selection_settings_markup(templates: list[dict], current_temp
             callback_data=f"settings_select_template_{template_id}"
         )])
     
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="settings_template_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def build_reminders_settings_markup(reminders_enabled: bool = False) -> InlineKeyboardMarkup:
@@ -358,7 +371,7 @@ def build_reminders_settings_markup(reminders_enabled: bool = False) -> InlineKe
         )],
         [InlineKeyboardButton(text="🕐 Время напоминания", callback_data="settings_reminder_time")],
         [InlineKeyboardButton(text="📅 Дни недели", callback_data="settings_reminder_days")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_reminders_back")]
     ])
 
 
