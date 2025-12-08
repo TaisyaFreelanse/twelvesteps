@@ -674,27 +674,6 @@ class TemplateProgress(Base):
     user: Mapped["User"] = relationship()
 
 
-class Gratitude(Base):
-    """Модель для хранения благодарностей пользователя"""
-    __tablename__ = "gratitudes"
-    
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    
-    # Текст благодарности
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    
-    # Дата создания
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
-    
-    # Relationships
-    user: Mapped["User"] = relationship()
-    step: Mapped["Step"] = relationship()
-    question: Mapped["Question"] = relationship()
-
-
 # --- STEP 10 DAILY ANALYSIS ---
 
 class Step10AnalysisStatus(Enum):
@@ -758,6 +737,7 @@ class Step10DailyAnalysis(Base):
 class Gratitude(Base):
     """Модель для хранения благодарностей пользователя"""
     __tablename__ = "gratitudes"
+    __table_args__ = {'extend_existing': True}
     
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
