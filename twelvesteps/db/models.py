@@ -672,6 +672,25 @@ class TemplateProgress(Base):
     
     # Relationships
     user: Mapped["User"] = relationship()
+
+
+class Gratitude(Base):
+    """Модель для хранения благодарностей пользователя"""
+    __tablename__ = "gratitudes"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    
+    # Текст благодарности
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Дата создания
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
     step: Mapped["Step"] = relationship()
     question: Mapped["Question"] = relationship()
 
@@ -731,6 +750,25 @@ class Step10DailyAnalysis(Base):
     )
     paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
+
+
+class Gratitude(Base):
+    """Модель для хранения благодарностей пользователя"""
+    __tablename__ = "gratitudes"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    
+    # Текст благодарности
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Дата создания
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
     
     # Relationships
     user: Mapped["User"] = relationship()

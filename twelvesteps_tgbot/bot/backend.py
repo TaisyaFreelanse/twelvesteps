@@ -355,6 +355,25 @@ class BackendClient:
         
         return ChatResponse(reply=reply, log=log)
     
+    # --- Gratitude Methods ---
+    
+    async def create_gratitude(self, access_token: str, text: str) -> dict:
+        """Создать новую благодарность"""
+        return await self._request(
+            "POST", 
+            "/gratitudes", 
+            token=access_token, 
+            json={"text": text}
+        )
+    
+    async def get_gratitudes(self, access_token: str, page: int = 1, page_size: int = 20) -> dict:
+        """Получить список благодарностей"""
+        return await self._request(
+            "GET",
+            f"/gratitudes?page={page}&page_size={page_size}",
+            token=access_token
+        )
+    
     # ================================================================
     # STEP 10 DAILY ANALYSIS METHODS
     # ================================================================

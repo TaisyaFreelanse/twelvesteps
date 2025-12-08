@@ -62,9 +62,12 @@ from bot.config import (
     build_all_feelings_markup,
     build_feelings_category_markup,
     build_fears_markup,
-    format_feelings_table_text,
     FEELINGS_CATEGORIES,
-    FEARS_LIST
+    FEARS_LIST,
+    # FAQ/Instructions:
+    build_faq_menu_markup,
+    build_faq_section_markup,
+    FAQ_SECTIONS
 )
 from bot.utils import split_long_message, send_long_message, edit_long_message
 from bot.onboarding import OnboardingStates, register_onboarding_handlers
@@ -187,6 +190,9 @@ def register_handlers(dp: Dispatcher) -> None:
     # 4.12. Feelings Flow
     dp.callback_query(F.data.startswith("feelings_"))(handle_feelings_callback)
     dp.callback_query(F.data.startswith("feeling_"))(handle_feeling_selection_callback)
+    
+    # 4.13. FAQ/Instructions Flow
+    dp.callback_query(F.data.startswith("faq_"))(handle_faq_callback)
 
     # 4. QA / Debug Commands
     dp.message(Command(commands=["qa_last"]))(qa_last)
@@ -1108,12 +1114,11 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 # ---------------------------------------------------------
 
 async def handle_feelings(message: Message, state: FSMContext) -> None:
-    """Handle Feelings button - show feelings table with categories"""
-    # Show the full feelings table as text
-    feelings_text = format_feelings_table_text()
-    feelings_text += "\n\n💡 Нажми на категорию, чтобы выбрать конкретное чувство."
+    """Handle Feelings button - show feelings categories menu"""
+    # Show only menu with categories, no text list
+    feelings_text = "💡 Нажми на категорию, чтобы выбрать конкретное чувство."
     
-    await send_long_message(message, feelings_text, reply_markup=build_all_feelings_markup())
+    await message.answer(feelings_text, reply_markup=build_all_feelings_markup())
 
 
 async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1128,11 +1133,10 @@ async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -
         return
     
     if data == "feelings_categories":
-        # Show all categories
-        feelings_text = format_feelings_table_text()
-        feelings_text += "\n\n💡 Нажми на категорию, чтобы выбрать конкретное чувство."
+        # Show all categories menu only
+        feelings_text = "💡 Нажми на категорию, чтобы выбрать конкретное чувство."
         
-        await edit_long_message(callback, feelings_text, reply_markup=build_all_feelings_markup())
+        await callback.message.edit_text(feelings_text, reply_markup=build_all_feelings_markup())
         await callback.answer()
         return
     
@@ -1194,67 +1198,45 @@ async def handle_feeling_selection_callback(callback: CallbackQuery, state: FSMC
 # ---------------------------------------------------------
 
 async def handle_faq(message: Message, state: FSMContext) -> None:
-    """Handle FAQ command - show frequently asked questions"""
-    faq_text = (
-        "📎 ИНСТРУКЦИИ — КАК ЭТО РАБОТАЕТ\n\n"
-        "🪜 Работа по шагу\n\n"
-        "• Что такое шаги?\n"
-        "Это 12 ключевых тем, через которые проходит каждый зависимый. Шаги помогают понять своё мышление, чувства, действия и изменить их. Это не теория — это личная практика.\n\n"
-        "• Как выбрать шаг и вопрос?\n"
-        "Если ты уже работаешь по шагу — продолжай. Если нет — выбери начальный шаг (обычно с 1-го). Внутри шага есть вопросы, которые раскрывают тему. Система запомнит, где ты остановился.\n\n"
-        "• Что делать, если не могу ответить?\n"
-        "Нажми «🧭 Помощь». Там есть варианты: «Не понял вопрос», «Нужны примеры», «Просто тяжело». GPT подскажет, поможет вспомнить и не даст застрять.\n\n"
-        "• Как сохраняется прогресс?\n"
-        "Все твои ответы сохраняются автоматически. Ты можешь поставить вопрос на паузу и вернуться. Прогресс виден в разделе «Мой прогресс».\n\n"
-        "📖 Самоанализ (10 шаг)\n\n"
-        "• Как работает?\n"
-        "Каждый день ты отвечаешь на вопросы. Это помогает отслеживать мысли, чувства, ошибки, помогает развиваться.\n\n"
-        "• Сколько вопросов?\n"
-        "В самоанализе 10 вопросов. Они повторяются ежедневно. Можно делать не все, а столько, сколько успеешь.\n\n"
-        "• Делать ли каждый день?\n"
-        "Желательно. Это как зарядка для осознанности. Но если не получилось — не страшно. Главное — возвращаться.\n\n"
-        "📘 Чувства\n\n"
-        "• Что такое таблица чувств?\n"
-        "Это список эмоций, которые можно выбрать, если сложно назвать, что ты чувствуешь. Они помогают лучше понять себя.\n\n"
-        "• Как использовать?\n"
-        "Когда заполняешь шаблон, можно открыть таблицу и выбрать подходящие чувства. Особенно это важно в блоке \"Чувства до / после\".\n\n"
-        "• Как выбрать нужное чувство?\n"
-        "Не обязательно выбирать «правильно». Просто найди то, что ближе всего к тому, как ты ощущаешь. Это не тест.\n\n"
-        "✍️ О себе\n\n"
-        "• Зачем писать?\n"
-        "Чем больше ты рассказываешь о себе, тем точнее GPT тебя понимает. Это как знакомство — без давления, но с пользой.\n\n"
-        "• Что, если не хочу?\n"
-        "Ты можешь пропустить. Но лучше дать хоть немного информации — это поможет в работе по шагам и в поддержке.\n\n"
-        "• Что такое \"Свободный рассказ\"?\n"
-        "Это раздел, где можно просто написать всё, что хочешь — без вопросов и рамок. GPT сам распределит по темам.\n\n"
-        "📋 Шаблон ответа\n\n"
-        "• Как выбрать или изменить?\n"
-        "Система автоматически использует авторский шаблон. Его можно изменить в настройках шага.\n\n"
-        "• Мой vs авторский шаблон?\n"
-        "Авторский — проверенная структура (ситуация, мысли, чувства, действия…). Свой — ты настраиваешь сам.\n\n"
-        "🧭 Помощь\n\n"
-        "• Когда использовать?\n"
-        "Когда застрял. Когда не знаешь, что ответить. Когда слишком тяжело. Или просто не понимаешь вопрос.\n\n"
-        "• Что значит \"Не понял вопрос\"?\n"
-        "GPT переформулирует вопрос и объяснит его.\n\n"
-        "• Как работает \"Нужны примеры\"\n"
-        "GPT даст тебе 12-18 бытовых ситуаций, где может проявляться тема шага. Это поможет вспомнить свою ситуацию. Если не нашел подходящий пример, нажми еще раз — получишь новые варианты.\n\n"
-        "• Что делать, если тяжело?\n"
-        "Нажми «Просто тяжело». GPT поддержит тебя. Иногда важно просто не быть одному.\n\n"
-        "🙏 Благодарности\n\n"
-        "• Зачем писать?\n"
-        "Чтобы учиться видеть хорошее. Благодарность переключает мышление и снижает тревогу.\n\n"
-        "• Как часто?\n"
-        "Хоть каждый день. Можно 4-5 фраз, за что именно ты сегодня благодарен — это может быть благодарность миру за теплый день и маме за вкусный обед.\n\n"
-        "• Кто видит?\n"
-        "Только ты. Это твой личный дневник. Никуда не отправляется.\n\n"
-        "📈 Прогресс\n\n"
-        "• Как посмотреть, что уже сделано?\n"
-        "Зайди в «Мой прогресс». Там будут шаги, вопросы, твои ответы и статус каждого.\n\n"
-        "• Что такое \"Мой прогресс\"?\n"
-        "Это твоя карта движения. Показывает, где ты, что уже пройдено, что осталось."
-    )
-    await send_long_message(message, faq_text, reply_markup=build_main_menu_markup())
+    """Handle FAQ command - show instructions menu"""
+    faq_text = "📎 ИНСТРУКЦИИ — КАК ЭТО РАБОТАЕТ\n\nВыбери раздел для просмотра:"
+    await message.answer(faq_text, reply_markup=build_faq_menu_markup())
+
+
+async def handle_faq_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle FAQ/Instructions callbacks"""
+    data = callback.data
+    
+    if data == "faq_back":
+        # Return to main menu
+        await callback.message.delete()
+        await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
+        await callback.answer()
+        return
+    
+    if data == "faq_menu":
+        # Return to FAQ menu
+        faq_text = "📎 ИНСТРУКЦИИ — КАК ЭТО РАБОТАЕТ\n\nВыбери раздел для просмотра:"
+        await callback.message.edit_text(faq_text, reply_markup=build_faq_menu_markup())
+        await callback.answer()
+        return
+    
+    if data.startswith("faq_section_"):
+        section_name = data.replace("faq_section_", "")
+        section_text = FAQ_SECTIONS.get(section_name)
+        
+        if section_text:
+            await edit_long_message(
+                callback,
+                section_text,
+                reply_markup=build_faq_section_markup()
+            )
+        else:
+            await callback.answer("Раздел не найден")
+        await callback.answer()
+        return
+    
+    await callback.answer()
 
 
 # ---------------------------------------------------------
@@ -1577,13 +1559,56 @@ async def handle_thanks_callback(callback: CallbackQuery, state: FSMContext) -> 
         return
     
     if data == "thanks_history":
-        # Show history
-        # TODO: Load from backend
-        await callback.message.edit_text(
-            "🗃️ История благодарностей\n\n"
-            "Пока записей нет. Добавь свою первую благодарность!",
-            reply_markup=build_thanks_history_markup()
-        )
+        # Show history - load from backend
+        try:
+            token = await get_or_fetch_token(telegram_id, callback.from_user.username, callback.from_user.first_name)
+            if not token:
+                await callback.answer("Ошибка авторизации")
+                return
+            
+            gratitudes_data = await BACKEND_CLIENT.get_gratitudes(token, page=1, page_size=20)
+            gratitudes = gratitudes_data.get("gratitudes", []) if gratitudes_data else []
+            total = gratitudes_data.get("total", 0) if gratitudes_data else 0
+            
+            if not gratitudes:
+                history_text = "🗃️ История благодарностей\n\nПока записей нет. Добавь свою первую благодарность!"
+            else:
+                history_text = f"🗃️ История благодарностей\n\nВсего записей: {total}\n\n"
+                for i, g in enumerate(gratitudes[:10], 1):  # Показываем первые 10
+                    created_at = g.get("created_at", "")
+                    if created_at:
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            date_str = dt.strftime("%d.%m.%Y")
+                        except:
+                            date_str = ""
+                    else:
+                        date_str = ""
+                    
+                    text = g.get("text", "")[:100]
+                    if len(g.get("text", "")) > 100:
+                        text += "..."
+                    
+                    history_text += f"{i}. {text}\n"
+                    if date_str:
+                        history_text += f"   📅 {date_str}\n"
+                    history_text += "\n"
+                
+                if total > 10:
+                    history_text += f"\n... и ещё {total - 10} записей"
+            
+            await callback.message.edit_text(
+                history_text,
+                reply_markup=build_thanks_history_markup()
+            )
+        except Exception as e:
+            logger.exception("Error loading gratitude history: %s", e)
+            await callback.message.edit_text(
+                "🗃️ История благодарностей\n\n"
+                "❌ Ошибка при загрузке истории. Попробуй позже.",
+                reply_markup=build_thanks_history_markup()
+            )
         await callback.answer()
         return
     
@@ -1599,23 +1624,40 @@ async def handle_thanks_callback(callback: CallbackQuery, state: FSMContext) -> 
 async def handle_thanks_entry_input(message: Message, state: FSMContext) -> None:
     """Handle input for gratitude entry"""
     telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
     text = message.text
     
-    # TODO: Save to backend
-    await state.clear()
-    
-    # Get motivational response from backend
     try:
-        backend_reply = await BACKEND_CLIENT.thanks(telegram_id=telegram_id, debug=False)
-        reply_text = backend_reply.reply if backend_reply else "Благодарность сохранена! 🙏"
-    except Exception:
-        reply_text = "✅ Благодарность записана! 🙏\n\nПродолжай в том же духе!"
-    
-    await send_long_message(
-        message, 
-        f"✅ Сохранено!\n\n{text}\n\n{reply_text}",
-        reply_markup=build_thanks_menu_markup()
-    )
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("Ошибка авторизации")
+            await state.clear()
+            return
+        
+        # Save gratitude to backend
+        await BACKEND_CLIENT.create_gratitude(token, text)
+        
+        # Get motivational response from backend
+        try:
+            backend_reply = await BACKEND_CLIENT.thanks(telegram_id=telegram_id, debug=False)
+            reply_text = backend_reply.reply if backend_reply else "Благодарность сохранена! 🙏"
+        except Exception:
+            reply_text = "✅ Благодарность записана! 🙏\n\nПродолжай в том же духе!"
+        
+        await state.clear()
+        await send_long_message(
+            message, 
+            f"✅ Сохранено!\n\n{text}\n\n{reply_text}",
+            reply_markup=build_thanks_menu_markup()
+        )
+    except Exception as e:
+        logger.exception("Error saving gratitude: %s", e)
+        await state.clear()
+        await message.answer(
+            "❌ Ошибка при сохранении благодарности. Попробуй ещё раз.",
+            reply_markup=build_thanks_menu_markup()
+        )
 
 
 # ---------------------------------------------------------
@@ -1694,8 +1736,9 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
                 progress_text,
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🗂 Выбрать вопрос", callback_data=f"progress_questions_{step_id}")],
+                    [InlineKeyboardButton(text="🔁 Сменить шаг", callback_data="progress_steps_list")],
                     [InlineKeyboardButton(text="▶️ Продолжить работу", callback_data="steps_continue")],
-                    [InlineKeyboardButton(text="◀️ Назад к списку шагов", callback_data="progress_steps_list")]
+                    [InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")]
                 ])
             )
         except Exception as e:
@@ -2764,25 +2807,13 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             return
         
         elif data == "step_progress":
-            # Show my progress - improved version with steps list
+            # Show my progress - only menu with steps, no text list
             steps_list = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_list.get("steps", []) if steps_list else []
             
-            progress_text = "📋 Мой прогресс\n\n"
+            progress_text = "📋 Мой прогресс\n\nВыбери шаг для просмотра:"
             
-            for step in steps:
-                step_number = step.get("number", step.get("id"))
-                step_title = step.get("title", "")
-                answered = step.get("answered_questions", 0)
-                total = step.get("total_questions", 0)
-                
-                if answered > 0 or step.get("status") == "IN_PROGRESS":
-                    progress_text += f"🪜 Шаг {step_number} — {step_title} ({answered} / {total})\n"
-                else:
-                    progress_text += f"⬜ Шаг {step_number} — {step_title} (0 / {total})\n"
-            
-            await edit_long_message(
-                callback,
+            await callback.message.edit_text(
                 progress_text,
                 reply_markup=build_progress_steps_list_markup(steps)
             )

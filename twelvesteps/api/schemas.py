@@ -579,3 +579,22 @@ class UserMetaUpdateRequest(BaseModel):
     time_zone: Optional[str] = None
     language: Optional[str] = None
     data_flags: Optional[Dict[str, Any]] = None
+
+
+# --- Gratitude Schemas ---
+
+class GratitudeCreateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+class GratitudeItem(BaseModel):
+    id: int
+    text: str
+    created_at: datetime
+
+
+class GratitudeListResponse(BaseModel):
+    gratitudes: List[GratitudeItem]
+    total: int
+    page: int = 1
+    page_size: int = 20

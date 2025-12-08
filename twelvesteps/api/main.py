@@ -75,6 +75,10 @@ from api.schemas import (
     TrackerSummaryCreateRequest,
     UserMetaResponse,
     UserMetaUpdateRequest,
+    # Gratitude schemas:
+    GratitudeCreateRequest,
+    GratitudeListResponse,
+    GratitudeItem,
 )
 from api.steps import StepFlowService
 # Ensure handle_sos is imported here (assuming you placed it in chat_service)
@@ -90,6 +94,7 @@ from repositories.FrameTrackingRepository import FrameTrackingRepository
 from repositories.QAStatusRepository import QAStatusRepository
 from repositories.UserMetaRepository import UserMetaRepository
 from repositories.TrackerSummaryRepository import TrackerSummaryRepository
+from repositories.GratitudeRepository import GratitudeRepository
 from datetime import date as date_class
 import pathlib
 
@@ -1789,5 +1794,61 @@ async def get_step10_progress(
         progress_summary=result["progress_summary"],
         answers=result.get("answers"),
         is_complete=result.get("is_complete", False)
+    )
+
+
+# --- Gratitude Endpoints ---
+
+@app.post("/gratitudes", response_model=GratitudeItem)
+async def create_gratitude(
+    payload: GratitudeCreateRequest,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> GratitudeItem:
+    """Создать новую благодарность"""
+    repo = GratitudeRepository(current_context.session)
+    gratitude = await repo.create(
+        user_id=current_context.user.id,
+        text=payload.text
+    )
+    
+    return GratitudeItem(
+        id=gratitude.id,
+        text=gratitude.text,
+        created_at=gratitude.created_at
+    )
+
+
+@app.get("/gratitudes", response_model=GratitudeListResponse)
+async def get_gratitudes(
+    page: int = 1,
+    page_size: int = 20,
+    current_context: CurrentUserContext = Depends(get_current_user)
+) -> GratitudeListResponse:
+    """Получить список благодарностей пользователя"""
+    repo = GratitudeRepository(current_context.session)
+    
+    offset = (page - 1) * page_size
+    gratitudes = await repo.get_user_gratitudes(
+        user_id=current_context.user.id,
+        limit=page_size,
+        offset=offset
+    )
+    
+    total = await repo.get_count(current_context.user.id)
+    
+    items = [
+        GratitudeItem(
+            id=g.id,
+            text=g.text,
+            created_at=g.created_at
+        )
+        for g in gratitudes
+    ]
+    
+    return GratitudeListResponse(
+        gratitudes=items,
+        total=total,
+        page=page,
+        page_size=page_size
     )
 
