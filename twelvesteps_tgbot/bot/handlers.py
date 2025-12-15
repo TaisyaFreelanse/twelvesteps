@@ -1790,17 +1790,55 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
             await callback.answer()
             try:
                 token = await get_or_fetch_token(telegram_id, username, first_name)
-                if token:
-                    # TODO: Load history from backend
-                    history_text = "🗃️ История\n\n(История пока пуста)"
+                if not token:
                     await callback.message.edit_text(
-                        history_text,
+                        "❌ Ошибка авторизации. Нажми /start.",
                         reply_markup=build_free_story_markup()
                     )
+                    return
+                
+                # Get free text history from backend
+                history_data = await BACKEND_CLIENT.get_free_text_history(token)
+                entries = history_data.get("entries", []) if history_data else []
+                total = history_data.get("total", 0) if history_data else 0
+                
+                if not entries:
+                    history_text = "🗃️ История\n\n(История пока пуста)"
+                else:
+                    history_text = f"🗃️ История\n\nВсего записей: {total}\n\n"
+                    for i, entry in enumerate(entries[:10], 1):  # Show first 10
+                        section_name = entry.get("section_name", "Неизвестный раздел")
+                        preview = entry.get("preview", "")
+                        created_at = entry.get("created_at", "")
+                        
+                        # Format date if available
+                        date_str = ""
+                        if created_at:
+                            try:
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                date_str = dt.strftime("%d.%m.%Y %H:%M")
+                            except:
+                                pass
+                        
+                        history_text += f"{i}. {section_name}\n"
+                        if preview:
+                            history_text += f"   {preview}\n"
+                        if date_str:
+                            history_text += f"   📅 {date_str}\n"
+                        history_text += "\n"
+                    
+                    if total > 10:
+                        history_text += f"\n... и ещё {total - 10} записей"
+                
+                await callback.message.edit_text(
+                    history_text,
+                    reply_markup=build_free_story_markup()
+                )
             except Exception as e:
                 logger.exception("Error loading history: %s", e)
                 await callback.message.edit_text(
-                    "🗃️ История\n\n(История пока пуста)",
+                    "🗃️ История\n\n❌ Ошибка при загрузке истории. Попробуй позже.",
                     reply_markup=build_free_story_markup()
                 )
             return
@@ -1984,17 +2022,36 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
 async def handle_about_entry_input(message: Message, state: FSMContext) -> None:
     """Handle input for about me section entry"""
     text = message.text
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
     data = await state.get_data()
     section = data.get("about_section", "about_free")
     
-    # TODO: Save to backend
-    await state.clear()
-    
-    await message.answer(
-        f"✅ Записано!\n\n"
-        f"Твоя информация сохранена.",
-        reply_markup=build_main_menu_markup()
-    )
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("Ошибка авторизации. Нажми /start.")
+            await state.clear()
+            return
+        
+        # Save as general free text (will be distributed across sections)
+        await BACKEND_CLIENT.submit_general_free_text(token, text)
+        
+        await state.clear()
+        
+        await message.answer(
+            f"✅ Записано!\n\n"
+            f"Твоя информация сохранена.",
+            reply_markup=build_free_story_markup()
+        )
+    except Exception as exc:
+        logger.exception("Error saving free story entry: %s", exc)
+        await state.clear()
+        await message.answer(
+            "❌ Ошибка при сохранении. Попробуй ещё раз.",
+            reply_markup=build_free_story_markup()
+        )
 
 
 # ---------------------------------------------------------

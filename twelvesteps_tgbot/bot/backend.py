@@ -237,6 +237,14 @@ class BackendClient:
         return await self._request(
             "POST", "/profile/free-text", token=access_token, json=payload
         )
+    
+    async def get_free_text_history(
+        self, access_token: str
+    ) -> Dict[str, Any]:
+        """Get all free text entries (history) for the user"""
+        return await self._request(
+            "GET", "/profile/free-text/history", token=access_token
+        )
 
     async def create_custom_section(
         self, access_token: str, name: str, icon: Optional[str] = None

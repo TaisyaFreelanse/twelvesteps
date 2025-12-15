@@ -161,6 +161,8 @@ class ProfileService:
         Get next question for a section based on FSM logic.
         If all basic questions are answered, generates a follow-up question using LLM.
         Otherwise, returns the first unanswered basic question or suggests next based on answer.
+        
+        Limits follow-up questions to maximum 2 per section to prevent infinite loops.
         """
         section = await self.repo.get_section_by_id(section_id)
         if not section:
@@ -177,8 +179,23 @@ class ProfileService:
         # Find unanswered questions
         unanswered = [q for q in questions if q.id not in answered_question_ids]
         
-        # If all basic questions are answered, generate follow-up question
+        # If all basic questions are answered, check if we should generate follow-up question
         if not unanswered and last_answer:
+            # Check how many generated questions (free text entries) already exist for this section
+            # This prevents infinite loops of follow-up questions
+            section_data = await self.repo.get_section_data(user_id, section_id)
+            generated_count = 0
+            if section_data and section_data.content:
+                # Count how many times "[Сгенерированный вопрос]" appears in content
+                # Each generated question is saved with this marker
+                content = section_data.content
+                generated_count = content.count("[Сгенерированный вопрос]")
+            
+            # Limit to maximum 1 follow-up question per section to prevent infinite loops
+            MAX_FOLLOW_UP_QUESTIONS = 1
+            if generated_count >= MAX_FOLLOW_UP_QUESTIONS:
+                return None  # Already generated enough follow-up questions
+            
             try:
                 follow_up_question = await self._generate_follow_up_question(
                     user_id, section, last_answer

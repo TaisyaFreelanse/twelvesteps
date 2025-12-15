@@ -813,21 +813,25 @@ async def submit_profile_answer(
         )
     else:
         # Generated question - save as free text in section
+        # Append to existing free text instead of overwriting
+        section_data_existing = await service.repo.get_section_data(
+            current_user.user.id, section_id
+        )
+        if section_data_existing and section_data_existing.content:
+            # Append to existing content
+            new_content = f"{section_data_existing.content}\n\n[Сгенерированный вопрос]\n{answer_data.answer_text}"
+        else:
+            # New free text entry
+            new_content = f"[Сгенерированный вопрос]\n{answer_data.answer_text}"
+        
         section_data = await service.save_free_text(
             current_user.user.id,
             section_id,
-            f"[Сгенерированный вопрос]\n{answer_data.answer_text}"
+            new_content
         )
-        # Try to generate next follow-up question
-        section = await service.get_section_detail(section_id, current_user.user.id)
-        if section:
-            next_question = await service.get_next_question_for_section(
-                current_user.user.id,
-                section_id,
-                answer_data.answer_text
-            )
-        else:
-            next_question = None
+        # Don't generate another follow-up question after answering a generated question
+        # This prevents infinite loops - limit to 1 follow-up question per section
+        next_question = None
         answer = None
     
     # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
@@ -943,6 +947,57 @@ async def submit_general_free_text(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing free text: {str(e)}")
+
+
+@app.get("/profile/free-text/history")
+async def get_free_text_history(
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Get all free text entries (history) for the user across all sections"""
+    from sqlalchemy import select
+    from db.models import ProfileSectionData, ProfileSection
+    
+    # Get all free text entries for user with section names
+    query = (
+        select(
+            ProfileSectionData.id,
+            ProfileSectionData.section_id,
+            ProfileSectionData.content,
+            ProfileSectionData.created_at,
+            ProfileSectionData.updated_at,
+            ProfileSection.name.label("section_name")
+        )
+        .join(ProfileSection, ProfileSectionData.section_id == ProfileSection.id)
+        .where(ProfileSectionData.user_id == current_user.user.id)
+        .where(ProfileSectionData.content.isnot(None))
+        .where(ProfileSectionData.content != "")
+        .order_by(ProfileSectionData.created_at.desc())
+    )
+    
+    result = await current_user.session.execute(query)
+    entries = result.all()
+    
+    history_items = []
+    for entry in entries:
+        # Extract text preview (first 100 chars)
+        content = entry.content or ""
+        preview = content[:100] + "..." if len(content) > 100 else content
+        
+        history_items.append({
+            "id": entry.id,
+            "section_id": entry.section_id,
+            "section_name": entry.section_name,
+            "content": content,
+            "preview": preview,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "updated_at": entry.updated_at.isoformat() if entry.updated_at else None
+        })
+    
+    return {
+        "status": "success",
+        "total": len(history_items),
+        "entries": history_items
+    }
 
 
 @app.post("/profile/sections/custom")
