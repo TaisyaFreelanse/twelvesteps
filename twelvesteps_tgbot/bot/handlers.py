@@ -4144,8 +4144,8 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                             total_questions=step_info.get("total_questions", 0)
                         )
                         full_text = f"{progress_indicator}\n\n{response_text}"
-            await edit_long_message(
-                callback,
+                        await edit_long_message(
+                            callback,
                             full_text,
                             reply_markup=build_step_actions_markup()
                         )
