@@ -180,6 +180,7 @@ def build_sos_save_draft_markup() -> InlineKeyboardMarkup:
 def build_sos_exit_markup() -> InlineKeyboardMarkup:
     """Markup for exiting SOS chat."""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="sos_back")],
         [InlineKeyboardButton(text="❌ Выйти из помощи", callback_data="sos_exit")]
     ])
 
@@ -242,6 +243,71 @@ def build_step_questions_markup(questions: list[dict], step_id: int) -> InlineKe
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+
+def build_settings_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
+    """Markup for selecting a step in settings (1-12)."""
+    buttons = []
+    # Create buttons in rows of 3
+    for i in range(0, len(steps), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(steps):
+                step = steps[i + j]
+                step_id = step.get('id')
+                step_number = step.get('number')
+                
+                if step_id is None or step_number is None:
+                    continue
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{step_number}",
+                    callback_data=f"step_settings_select_{step_id}"
+                ))
+        if row:
+            buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_steps")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_settings_questions_list_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
+    """Markup for selecting a question in settings."""
+    buttons = []
+    for i, q in enumerate(questions, 1):
+        buttons.append([InlineKeyboardButton(
+            text=f"{i}",
+            callback_data=f"step_settings_question_{q['id']}"
+        )])
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="step_settings_select_question")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_settings_select_step_for_question_markup(steps: list[dict]) -> InlineKeyboardMarkup:
+    """Markup for selecting a step first, then question."""
+    buttons = []
+    # Create buttons in rows of 3
+    for i in range(0, len(steps), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(steps):
+                step = steps[i + j]
+                step_id = step.get('id')
+                step_number = step.get('number')
+                
+                if step_id is None or step_number is None:
+                    continue
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{step_number}",
+                    callback_data=f"step_settings_question_step_{step_id}"
+                ))
+        if row:
+            buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_steps")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def format_step_progress_indicator(
     step_number: int,
     total_steps: int,
@@ -250,14 +316,14 @@ def format_step_progress_indicator(
     total_questions: Optional[int] = None
 ) -> str:
     """
-    Format step progress indicator text in compact format.
-    Example: "📘 Ты сейчас на:\nШаг 2 — Здравомыслие\nВопрос 4 из 12"
+    Format step progress indicator text in simple format.
+    Example: "Шаг Первый — Бессилие\nВопрос 1 из 33"
     """
     from typing import Optional
     
-    indicator_parts = ["📘 Ты сейчас на:"]
+    indicator_parts = []
     
-    # Step indicator
+    # Step indicator - simplified
     step_text = f"Шаг {step_number}"
     if step_title:
         step_text += f" — {step_title}"
@@ -282,9 +348,8 @@ def build_step_actions_markup(has_template_progress: bool = False, show_descript
         InlineKeyboardButton(text="📋 Мой прогресс", callback_data="step_progress")
     ])
     
-    # Second row: Сохранить and Описание шага
+    # Second row: Описание шага
     buttons.append([
-        InlineKeyboardButton(text="⏸ Сохранить", callback_data="step_pause"),
         InlineKeyboardButton(
             text="🔽 Свернуть описание" if show_description else "🧾 Описание шага",
             callback_data="step_toggle_description"
@@ -297,12 +362,22 @@ def build_step_actions_markup(has_template_progress: bool = False, show_descript
         InlineKeyboardButton(text="🧭 Помощь", callback_data="sos_help")
     ])
     
-    # Fourth row: Ответить по шаблону (if no template progress in progress) - hidden by default
-    if not has_template_progress:
-        # Можно добавить в настройки или показать через длинное нажатие
-        pass
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_step_answer_mode_markup() -> InlineKeyboardMarkup:
+    """Markup for answer mode with draft controls."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💾 Сохранить черновик", callback_data="step_save_draft"),
+            InlineKeyboardButton(text="✏️ Редактировать последний ответ", callback_data="step_edit_last")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Сбросить", callback_data="step_reset_draft"),
+            InlineKeyboardButton(text="✔️ Завершить и перейти", callback_data="step_complete")
+        ],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="step_back_from_answer")]
+    ])
 
 
 def build_template_filling_markup() -> InlineKeyboardMarkup:
@@ -402,8 +477,8 @@ def build_language_settings_markup(current_lang: str = "ru") -> InlineKeyboardMa
 def build_step_settings_markup() -> InlineKeyboardMarkup:
     """Step-specific settings menu."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔁 Начать заново текущий шаг", callback_data="step_settings_restart")],
-        [InlineKeyboardButton(text="✏️ Настроить кастомный шаблон", callback_data="step_settings_custom_template")],
+        [InlineKeyboardButton(text="🪜 Выбрать шаг вручную", callback_data="step_settings_select_step")],
+        [InlineKeyboardButton(text="🗂 Выбрать вопрос вручную", callback_data="step_settings_select_question")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
     ])
 
@@ -411,43 +486,39 @@ def build_step_settings_markup() -> InlineKeyboardMarkup:
 def build_profile_settings_markup() -> InlineKeyboardMarkup:
     """Profile settings menu."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Рассказать о себе", callback_data="profile_settings_about")],
-        [InlineKeyboardButton(text="🧭 Мои цели и мотивации (скоро)", callback_data="profile_settings_goals")],
-        [InlineKeyboardButton(text="📈 История шагов (скоро)", callback_data="profile_settings_history")],
+        [InlineKeyboardButton(text="🪪 Расскажи о себе", callback_data="profile_settings_about")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
     ])
 
 
-def build_about_me_sections_markup() -> InlineKeyboardMarkup:
-    """About me sections menu."""
-    sections = [
-        ("🏠 Семья", "about_family"),
-        ("🧑‍🤝‍🧑 Друзья", "about_friends"),
-        ("🎓 Учёба", "about_education"),
-        ("🧒 Детство", "about_childhood"),
-        ("🎨 Хобби", "about_hobby"),
-        ("💼 Работа / Дело", "about_work"),
-        ("🙌 Поддержка рядом", "about_support"),
-        ("🕒 Режим и быт", "about_routine"),
-        ("🧭 Ценности и правила", "about_values"),
-        ("🛑 Границы и \"не трогать\"", "about_boundaries"),
-        ("💪 Сильные стороны", "about_strengths"),
-        ("🩺 Здоровье", "about_health"),
-        ("📜 Свободный рассказ", "about_free"),
-        ("➕ Добавить свой блок", "about_custom"),
-    ]
-    
+def build_about_me_main_markup() -> InlineKeyboardMarkup:
+    """Main menu for 'Tell about yourself' with 2 tabs."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Свободный рассказ", callback_data="about_free_story")],
+        [InlineKeyboardButton(text="👣 Пройти мини-опрос", callback_data="about_mini_survey")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")]
+    ])
+
+
+def build_free_story_markup() -> InlineKeyboardMarkup:
+    """Markup for free story section."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить запись", callback_data="about_add_free")],
+        [InlineKeyboardButton(text="🗃️ История", callback_data="about_history_free")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")]
+    ])
+
+
+def build_mini_survey_markup(question_id: Optional[int] = None, can_skip: bool = False) -> InlineKeyboardMarkup:
+    """Markup for mini survey with action buttons."""
     buttons = []
-    row = []
-    for text, callback in sections:
-        row.append(InlineKeyboardButton(text=text, callback_data=callback))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")])
+    if can_skip:
+        buttons.append([InlineKeyboardButton(text="🔁 Пропустить", callback_data="about_survey_skip")])
+    buttons.append([
+        InlineKeyboardButton(text="⏸ Пауза", callback_data="about_survey_pause"),
+        InlineKeyboardButton(text="✔️ Сохранить и продолжить", callback_data="about_survey_save")
+    ])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -465,50 +536,17 @@ def build_about_section_actions_markup(section_id: str) -> InlineKeyboardMarkup:
 # --- Progress Keyboards ---
 
 def build_progress_step_markup(step_id: int, step_number: int, step_title: str) -> InlineKeyboardMarkup:
-    """Markup for viewing a specific step's progress with questions."""
+    """Markup for viewing a specific step's progress."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗂 Выбрать вопрос", callback_data=f"progress_questions_{step_id}")],
-        [InlineKeyboardButton(text="▶️ Продолжить работу", callback_data="steps_continue")],
-        [InlineKeyboardButton(text="◀️ Назад к списку шагов", callback_data="progress_steps_list")]
+        [InlineKeyboardButton(text="📄 Посмотреть ответы", callback_data="progress_view_answers")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="progress_main")]
     ])
 
 
-def build_progress_questions_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
-    """Markup for listing questions with status and allowing selection."""
-    buttons = []
-    for q in questions:
-        q_id = q.get("id")
-        q_number = q.get("number", 0)
-        q_text = q.get("text", "")[:35]
-        status = q.get("status", "")
-        answer_preview = q.get("answer_preview", "")
-        
-        # Status emoji
-        if status == "COMPLETED":
-            status_emoji = "✅"
-            if answer_preview:
-                display_text = f"{status_emoji} {q_number}. {answer_preview[:30]}..."
-            else:
-                display_text = f"{status_emoji} {q_number}. {q_text}..."
-        elif status == "IN_PROGRESS" or answer_preview:
-            status_emoji = "⏳"
-            display_text = f"{status_emoji} {q_number}. (черновик)"
-        else:
-            status_emoji = "⬜"
-            display_text = f"{status_emoji} {q_number}. {q_text}..."
-        
-        buttons.append([InlineKeyboardButton(
-            text=display_text[:60],
-            callback_data=f"progress_select_q_{q_id}"
-        )])
-    
-    buttons.append([InlineKeyboardButton(text="🔁 Сменить шаг", callback_data="progress_steps_list")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"progress_step_{step_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_progress_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
-    """Markup for progress view - list of steps with their progress."""
+def build_progress_main_markup(steps: list[dict]) -> InlineKeyboardMarkup:
+    """Main progress menu - shows steps with progress and 'View answers' button."""
     buttons = []
     for step in steps:
         step_id = step.get("id")
@@ -517,19 +555,74 @@ def build_progress_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
         answered = step.get("answered_questions", 0)
         total = step.get("total_questions", 0)
         
-        if answered > 0:
-            buttons.append([InlineKeyboardButton(
-                text=f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})",
-                callback_data=f"progress_step_{step_id}"
-            )])
-        else:
-            buttons.append([InlineKeyboardButton(
-                text=f"⬜ Шаг {step_number} — {step_title} (0/{total})",
-                callback_data=f"progress_step_{step_id}"
-            )])
+        buttons.append([InlineKeyboardButton(
+            text=f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})",
+            callback_data=f"progress_step_{step_id}"
+        )])
     
-    buttons.append([InlineKeyboardButton(text="🔁 Сменить текущий шаг", callback_data="steps_select")])
+    buttons.append([InlineKeyboardButton(text="📄 Посмотреть ответы", callback_data="progress_view_answers")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_progress_view_answers_steps_markup(steps: list[dict]) -> InlineKeyboardMarkup:
+    """Markup for selecting a step to view answers (numbers only, like feelings)."""
+    buttons = []
+    # Create buttons in rows of 3
+    for i in range(0, len(steps), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(steps):
+                step = steps[i + j]
+                step_id = step.get('id')
+                step_number = step.get('number')
+                
+                if step_id is None or step_number is None:
+                    continue
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{step_number}",
+                    callback_data=f"progress_answers_step_{step_id}"
+                ))
+        if row:
+            buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="progress_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_progress_view_answers_questions_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
+    """Markup for selecting a question to view answer (numbers only, like feelings)."""
+    buttons = []
+    # Create buttons in rows of 3
+    for i in range(0, len(questions), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(questions):
+                q = questions[i + j]
+                q_id = q.get('id')
+                q_number = q.get('number', i + j + 1)
+                
+                if q_id is None:
+                    continue
+                
+                # Show status indicator
+                status = q.get("status", "")
+                if status == "COMPLETED":
+                    emoji = "✅"
+                elif status == "IN_PROGRESS" or q.get("answer_preview"):
+                    emoji = "⏳"
+                else:
+                    emoji = "⬜"
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{emoji} {q_number}",
+                    callback_data=f"progress_answers_question_{q_id}"
+                ))
+        if row:
+            buttons.append(row)
+    
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="progress_view_answers")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

@@ -42,6 +42,7 @@ from bot.config import (
     build_steps_list_markup,
     build_step_questions_markup,
     build_step_actions_markup,
+    build_step_answer_mode_markup,
     build_steps_settings_markup,
     build_template_selection_settings_markup,
     build_reminders_settings_markup,
@@ -50,11 +51,16 @@ from bot.config import (
     build_language_settings_markup,
     build_step_settings_markup,
     build_profile_settings_markup,
-    build_about_me_sections_markup,
-    build_about_section_actions_markup,
+    build_about_me_main_markup,
+    build_free_story_markup,
+    build_mini_survey_markup,
+    build_settings_steps_list_markup,
+    build_settings_questions_list_markup,
+    build_settings_select_step_for_question_markup,
     build_progress_step_markup,
-    build_progress_questions_markup,
-    build_progress_steps_list_markup,
+    build_progress_main_markup,
+    build_progress_view_answers_steps_markup,
+    build_progress_view_answers_questions_markup,
     build_thanks_menu_markup,
     build_thanks_history_markup,
     build_feelings_categories_markup,
@@ -79,6 +85,7 @@ USER_LOGS: dict[int, list[Log]] = {}
 # --- STATES ---
 class StepState(StatesGroup):
     answering = State()  # User is currently answering a step question
+    answer_mode = State()  # User is in answer mode (can save draft, edit, etc.)
     filling_template = State()  # User is filling answer by template
     template_field = State()  # User is entering value for a template field
 
@@ -135,8 +142,9 @@ def register_handlers(dp: Dispatcher) -> None:
     # 2. Onboarding Flow
     register_onboarding_handlers(dp)
 
-    # 3. Step Answering Flow (Only works if state is StepState.answering)
+    # 3. Step Answering Flow (Only works if state is StepState.answering or StepState.answer_mode)
     dp.message(StateFilter(StepState.answering))(handle_step_answer)
+    dp.message(StateFilter(StepState.answer_mode))(handle_step_answer_mode)
     dp.message(StateFilter(StepState.filling_template))(handle_template_field_input)
     dp.message(Command(commands=["qa_open"]))(qa_open)
     
@@ -391,6 +399,165 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
 # STEP ANSWER HANDLER (State: StepState.answering)
 # ---------------------------------------------------------
 
+async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
+    """
+    Handles text input in answer mode - supports draft saving, editing, and completion.
+    """
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    user_text = message.text
+
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("Ошибка авторизации. Нажми /start.")
+            await state.clear()
+            return
+        
+        state_data = await state.get_data()
+        action = state_data.get("action")
+        
+        if action == "save_draft":
+            # Save as draft
+            await BACKEND_CLIENT.save_draft(token, user_text)
+            await state.update_data(action=None, current_draft=user_text)
+            
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if step_data:
+                response_text = step_data.get("message", "")
+                progress_indicator = format_step_progress_indicator(
+                    step_number=step_info.get("step_number"),
+                    total_steps=step_info.get("total_steps", 12),
+                    step_title=step_info.get("step_title"),
+                    answered_questions=step_info.get("answered_questions", 0),
+                    total_questions=step_info.get("total_questions", 0)
+                )
+                full_text = (
+                    f"{progress_indicator}\n\n"
+                    f"❔{response_text}\n\n"
+                    f"📝 Поле для ответа:\n"
+                    f"💾 Черновик сохранён: {user_text[:100]}{'...' if len(user_text) > 100 else ''}"
+                )
+                await message.answer(
+                    "✅ Черновик сохранён!",
+                    reply_markup=build_step_answer_mode_markup()
+                )
+            return
+        
+        if action == "edit_answer":
+            # Edit previous answer - save as new answer
+            step_next = await process_step_message(
+                telegram_id=telegram_id,
+                text=user_text,
+                username=username,
+                first_name=first_name
+            )
+            
+            if not step_next:
+                await message.answer("Сессия потеряна. Нажми /steps снова.")
+                await state.clear()
+                return
+            
+            if step_next.get("error"):
+                error_message = step_next.get("message", "Ошибка валидации")
+                await message.answer(
+                    f"{error_message}\n\n"
+                    "Попробуй ещё раз:",
+                    reply_markup=build_step_answer_mode_markup()
+                )
+                return
+            
+            # Answer saved successfully
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            response_text = step_next.get("message", "Ответ обновлён.")
+            is_completed = step_next.get("is_completed", False)
+            
+            if step_info.get("step_number"):
+                progress_indicator = format_step_progress_indicator(
+                    step_number=step_info.get("step_number", 0),
+                    total_steps=step_info.get("total_steps", 12),
+                    step_title=step_info.get("step_title"),
+                    answered_questions=step_info.get("answered_questions", 0),
+                    total_questions=step_info.get("total_questions", 0)
+                )
+                full_response = f"{progress_indicator}\n\n✅ Ответ обновлён!\n\n❔{response_text}"
+            else:
+                full_response = f"✅ Ответ обновлён!\n\n❔{response_text}"
+            
+            await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
+            await state.update_data(action=None)
+            await state.set_state(StepState.answering)
+            
+            if is_completed:
+                await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
+                await state.clear()
+            return
+        
+        if action == "complete":
+            # Complete answer and move to next
+            step_next = await process_step_message(
+                telegram_id=telegram_id,
+                text=user_text,
+                username=username,
+                first_name=first_name
+            )
+            
+            if not step_next:
+                await message.answer("Сессия потеряна. Нажми /steps снова.")
+                await state.clear()
+                return
+            
+            if step_next.get("error"):
+                error_message = step_next.get("message", "Ошибка валидации")
+                await message.answer(
+                    f"{error_message}\n\n"
+                    "Ответ должен быть достаточно подробным. Попробуй ещё раз:",
+                    reply_markup=build_step_answer_mode_markup()
+                )
+                return
+            
+            # Answer completed successfully
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            response_text = step_next.get("message", "Ответ принят.")
+            is_completed = step_next.get("is_completed", False)
+            
+            if step_info.get("step_number"):
+                progress_indicator = format_step_progress_indicator(
+                    step_number=step_info.get("step_number", 0),
+                    total_steps=step_info.get("total_steps", 12),
+                    step_title=step_info.get("step_title"),
+                    answered_questions=step_info.get("answered_questions", 0),
+                    total_questions=step_info.get("total_questions", 0)
+                )
+                full_response = f"{progress_indicator}\n\n✅ Ответ завершён и сохранён!\n\n❔{response_text}"
+            else:
+                full_response = f"✅ Ответ завершён и сохранён!\n\n❔{response_text}"
+            
+            await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
+            await state.update_data(action=None, current_draft="")
+            await state.set_state(StepState.answering)
+            
+            if is_completed:
+                await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
+                await state.clear()
+            return
+        
+        # Default: just save as draft if no action specified
+        await BACKEND_CLIENT.save_draft(token, user_text)
+        await state.update_data(current_draft=user_text)
+        await message.answer(
+            "💾 Текст сохранён как черновик.\n\n"
+            "Используй кнопки для управления:",
+            reply_markup=build_step_answer_mode_markup()
+        )
+        
+    except Exception as exc:
+        logger.exception("Error processing step answer mode: %s", exc)
+        await message.answer("❌ Произошла ошибка. Попробуй ещё раз.")
+
+
 async def handle_step_answer(message: Message, state: FSMContext) -> None:
     """
     Processes the user's text as an answer to the active step question.
@@ -403,22 +570,7 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
     user_text = message.text
 
     try:
-        state_data = await state.get_data()
-        action = state_data.get("action")
-        
-        if action == "pause":
-            # Save as draft
-            token = await get_or_fetch_token(telegram_id, username, first_name)
-            if token:
-                await BACKEND_CLIENT.save_draft(token, user_text)
-                await message.answer("✅ Черновик сохранён. Можешь вернуться позже.")
-                await state.update_data(action=None)
-                await state.set_state(StepState.answering)
-            else:
-                await message.answer("Ошибка авторизации.")
-            return
-        
-        # Normal answer processing
+        # Normal answer processing (direct submission without draft mode)
         step_next = await process_step_message(
             telegram_id=telegram_id,
             text=user_text,
@@ -986,6 +1138,29 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             )
             
             reply_text = sos_response.get("reply", "Готов помочь!")
+            
+            # For "question" type, clean up the response - remove extra formatting
+            if help_type == "question":
+                # Remove "Простыми словами:", "Про что это:", "Можно понять как:" sections
+                lines = reply_text.split("\n")
+                cleaned_lines = []
+                skip_until_empty = False
+                for i, line in enumerate(lines):
+                    if any(marker in line for marker in ["**Простыми словами:**", "**Про что это:**", "**Можно понять как:**", "Простыми словами:", "Про что это:", "Можно понять как:"]):
+                        skip_until_empty = True
+                        continue
+                    if skip_until_empty and line.strip() == "":
+                        skip_until_empty = False
+                        continue
+                    if not skip_until_empty:
+                        cleaned_lines.append(line)
+                reply_text = "\n".join(cleaned_lines).strip()
+            
+            # For "examples" type, ensure we show examples
+            if help_type == "examples" and "пример" not in reply_text.lower() and "example" not in reply_text.lower():
+                # If no examples in response, add a note
+                reply_text += "\n\n💡 Если нужны конкретные примеры, напиши мне об этом."
+            
             await edit_long_message(
                 callback,
                 f"🆘 Помощь: {help_type_name}\n\n{reply_text}",
@@ -1154,10 +1329,8 @@ async def handle_thanks(message: Message, state: FSMContext) -> None:
 
 async def handle_feelings(message: Message, state: FSMContext) -> None:
     """Handle Feelings button - show feelings categories menu"""
-    # Show only menu with categories, no text list
-    feelings_text = "💡 Нажми на категорию, чтобы выбрать конкретное чувство."
-    
-    await message.answer(feelings_text, reply_markup=build_all_feelings_markup())
+    # Show only menu with categories, no text
+    await message.answer("📘 Чувства", reply_markup=build_all_feelings_markup())
 
 
 async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1173,9 +1346,7 @@ async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -
     
     if data == "feelings_categories":
         # Show all categories menu only
-        feelings_text = "💡 Нажми на категорию, чтобы выбрать конкретное чувство."
-        
-        await callback.message.edit_text(feelings_text, reply_markup=build_all_feelings_markup())
+        await callback.message.edit_text("📘 Чувства", reply_markup=build_all_feelings_markup())
         await callback.answer()
         return
     
@@ -1190,12 +1361,9 @@ async def handle_feelings_callback(callback: CallbackQuery, state: FSMContext) -
                 break
         
         if full_category:
-            feelings = FEELINGS_CATEGORIES.get(full_category, [])
-            feelings_list = ", ".join(feelings)
-            
+            # Show only category name, no feelings list
             await callback.message.edit_text(
-                f"{full_category}\n\n{feelings_list}\n\n"
-                "💡 Нажми на чувство, чтобы скопировать:",
+                f"{full_category}",
                 reply_markup=build_feelings_category_markup(full_category)
             )
         await callback.answer()
@@ -1401,47 +1569,104 @@ async def handle_step_settings_callback(callback: CallbackQuery, state: FSMConte
     username = callback.from_user.username
     first_name = callback.from_user.first_name
     
-    if data == "step_settings_restart":
-        # Restart current step
-        await callback.message.edit_text(
-            "🔁 Начать заново текущий шаг\n\n"
-            "Это очистит все ответы по текущему шагу.\n"
-            "Вы уверены?",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Да, начать заново", callback_data="step_settings_restart_confirm")],
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="main_settings_steps")]
-            ])
-        )
-        await callback.answer()
-        return
-    
-    if data == "step_settings_restart_confirm":
-        # TODO: Implement step restart via backend
-        await callback.message.edit_text(
-            "✅ Текущий шаг будет перезапущен.\n\n"
-            "(Функция в разработке)",
-            reply_markup=build_step_settings_markup()
-        )
-        await callback.answer("Функция в разработке")
-        return
-    
-    if data == "step_settings_custom_template":
-        # Go to template customization
+    if data == "step_settings_select_step":
+        # Show list of steps to select
         try:
             token = await get_or_fetch_token(telegram_id, username, first_name)
             if token:
-                templates_data = await BACKEND_CLIENT.get_templates(token)
-                templates = templates_data.get("templates", []) if templates_data else []
-                current_template_id = templates_data.get("active_template_id") if templates_data else None
+                steps_data = await BACKEND_CLIENT.get_all_steps(token)
+                steps = steps_data.get("steps", []) if steps_data else []
                 
                 await callback.message.edit_text(
-                    "✏️ Настроить шаблон\n\n"
-                    "Выбери шаблон для работы:",
-                    reply_markup=build_template_selection_settings_markup(templates, current_template_id)
+                    "🪜 Выбрать шаг вручную\n\n"
+                    "Выбери номер шага:",
+                    reply_markup=build_settings_steps_list_markup(steps)
                 )
         except Exception as e:
-            logger.exception("Error loading templates: %s", e)
-            await callback.answer("Ошибка загрузки шаблонов")
+            logger.exception("Error loading steps: %s", e)
+            await callback.answer("Ошибка загрузки шагов")
+        await callback.answer()
+        return
+    
+    if data.startswith("step_settings_select_"):
+        # User selected a step - switch to it
+        try:
+            step_id = int(data.split("_")[-1])
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                result = await BACKEND_CLIENT.switch_step(token, step_id)
+                if result:
+                    await callback.message.edit_text(
+                        f"✅ Переключено на шаг {step_id}\n\n"
+                        "Теперь ты работаешь с этим шагом.",
+                        reply_markup=build_step_settings_markup()
+                    )
+                else:
+                    await callback.answer("Ошибка переключения шага")
+        except Exception as e:
+            logger.exception("Error switching step: %s", e)
+            await callback.answer("Ошибка переключения шага")
+        await callback.answer()
+        return
+    
+    if data == "step_settings_select_question":
+        # Show list of steps first, then questions
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                steps_data = await BACKEND_CLIENT.get_all_steps(token)
+                steps = steps_data.get("steps", []) if steps_data else []
+                
+                await callback.message.edit_text(
+                    "🗂 Выбрать вопрос вручную\n\n"
+                    "Сначала выбери шаг:",
+                    reply_markup=build_settings_select_step_for_question_markup(steps)
+                )
+        except Exception as e:
+            logger.exception("Error loading steps: %s", e)
+            await callback.answer("Ошибка загрузки шагов")
+        await callback.answer()
+        return
+    
+    if data.startswith("step_settings_question_step_"):
+        # User selected a step, now show questions
+        try:
+            step_id = int(data.split("_")[-1])
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                questions = questions_data.get("questions", []) if questions_data else []
+                
+                await callback.message.edit_text(
+                    f"🗂 Выбрать вопрос вручную\n\n"
+                    f"Шаг {step_id}\n"
+                    "Выбери номер вопроса:",
+                    reply_markup=build_settings_questions_list_markup(questions, step_id)
+                )
+        except Exception as e:
+            logger.exception("Error loading questions: %s", e)
+            await callback.answer("Ошибка загрузки вопросов")
+        await callback.answer()
+        return
+    
+    if data.startswith("step_settings_question_"):
+        # User selected a question - switch to it
+        try:
+            question_id = int(data.split("_")[-1])
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                result = await BACKEND_CLIENT.switch_to_question(token, question_id)
+                if result:
+                    await callback.message.edit_text(
+                        f"✅ Переключено на вопрос {question_id}\n\n"
+                        "Теперь ты работаешь с этим вопросом.",
+                        reply_markup=build_step_settings_markup()
+                    )
+                else:
+                    await callback.answer("Ошибка переключения вопроса")
+        except Exception as e:
+            logger.exception("Error switching question: %s", e)
+            await callback.answer("Ошибка переключения вопроса")
         await callback.answer()
         return
     
@@ -1463,22 +1688,13 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
         return
     
     if data == "profile_settings_about":
-        # Show about me sections
+        # Show main menu for "Tell about yourself"
         await callback.message.edit_text(
-            "✍️ Рассказать о себе\n\n"
-            "Чем больше ты расскажешь, тем лучше GPT поможет тебе.\n\n"
-            "Выбери раздел:",
-            reply_markup=build_about_me_sections_markup()
+            "🪪 Расскажи о себе\n\n"
+            "Выбери способ:",
+            reply_markup=build_about_me_main_markup()
         )
         await callback.answer()
-        return
-    
-    if data == "profile_settings_goals":
-        await callback.answer("🧭 Цели и мотивации — скоро!", show_alert=True)
-        return
-    
-    if data == "profile_settings_history":
-        await callback.answer("📈 История шагов — скоро!", show_alert=True)
         return
     
     await callback.answer()
@@ -1487,65 +1703,183 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
 async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Handle about me section callbacks"""
     data = callback.data
+    telegram_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name
     
-    # Section names mapping
-    section_names = {
-        "about_family": "🏠 Семья",
-        "about_friends": "🧑‍🤝‍🧑 Друзья",
-        "about_education": "🎓 Учёба",
-        "about_childhood": "🧒 Детство",
-        "about_hobby": "🎨 Хобби",
-        "about_work": "💼 Работа / Дело",
-        "about_support": "🙌 Поддержка рядом",
-        "about_routine": "🕒 Режим и быт",
-        "about_values": "🧭 Ценности и правила",
-        "about_boundaries": "🛑 Границы",
-        "about_strengths": "💪 Сильные стороны",
-        "about_health": "🩺 Здоровье",
-        "about_free": "📜 Свободный рассказ",
-        "about_custom": "➕ Добавить свой блок"
-    }
+    if data == "about_free_story":
+        # Show free story section
+        await callback.message.edit_text(
+            "✍️ Свободный рассказ\n\n"
+            "Здесь ты можешь свободно рассказать о себе.",
+            reply_markup=build_free_story_markup()
+        )
+        await callback.answer()
+        return
     
-    # Handle section selection
-    for section_id, section_name in section_names.items():
-        if data == section_id:
-            # Store current section in state
-            await state.update_data(about_section=section_id)
-            
-            await callback.message.edit_text(
-                f"{section_name}\n\n"
-                "Здесь ты можешь добавить информацию о себе.\n"
-                "Выбери действие:",
-                reply_markup=build_about_section_actions_markup(section_id.replace("about_", ""))
-            )
-            await callback.answer()
-            return
-    
-    # Handle add entry
-    if data.startswith("about_add_"):
-        section = data.replace("about_add_", "")
-        section_name = section_names.get(f"about_{section}", section)
-        
-        await state.update_data(about_section=f"about_{section}")
+    if data == "about_add_free":
+        # Add free story entry
+        await state.update_data(about_section="about_free")
         await state.set_state(AboutMeStates.adding_entry)
         
         await callback.message.edit_text(
-            f"{section_name}\n\n"
+            "✍️ Свободный рассказ\n\n"
             "Напиши то, что хочешь добавить:"
         )
         await callback.answer()
         return
     
-    # Handle view history
-    if data.startswith("about_history_"):
-        section = data.replace("about_history_", "")
-        # TODO: Load history from backend
+    if data == "about_history_free":
+        # View free story history
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                # TODO: Load history from backend
+                history_text = "🗃️ История\n\n(История пока пуста)"
+                await callback.message.edit_text(
+                    history_text,
+                    reply_markup=build_free_story_markup()
+                )
+        except Exception as e:
+            logger.exception("Error loading history: %s", e)
+            await callback.message.edit_text(
+                "🗃️ История\n\n(История пока пуста)",
+                reply_markup=build_free_story_markup()
+            )
+        await callback.answer()
+        return
+    
+    if data == "about_mini_survey":
+        # Start mini survey
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                # Get first question from profile sections
+                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+                sections = sections_data.get("sections", []) if sections_data else []
+                
+                if not sections:
+                    await callback.message.edit_text(
+                        "👣 Пройти мини-опрос\n\n"
+                        "Вопросы пока не доступны.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                    await callback.answer()
+                    return
+                
+                # Get first section with questions
+                first_question = None
+                section_id = None
+                for section in sections:
+                    section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
+                    questions = section_detail.get("section", {}).get("questions", [])
+                    if questions:
+                        first_question = questions[0]
+                        section_id = section.get("id")
+                        break
+                
+                if not first_question:
+                    await callback.message.edit_text(
+                        "👣 Пройти мини-опрос\n\n"
+                        "Вопросы пока не доступны.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                    await callback.answer()
+                    return
+                
+                # Store survey state
+                await state.update_data(
+                    survey_section_id=section_id,
+                    survey_question_id=first_question.get("id"),
+                    survey_question_index=0,
+                    survey_mode=True
+                )
+                await state.set_state(ProfileStates.answering_question)
+                
+                question_text = first_question.get("question_text", "")
+                is_optional = first_question.get("is_optional", False)
+                
+                await callback.message.edit_text(
+                    f"👣 Пройти мини-опрос\n\n"
+                    f"❓ {question_text}",
+                    reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
+                )
+        except Exception as e:
+            logger.exception("Error starting survey: %s", e)
+            await callback.answer("Ошибка загрузки опроса")
+        await callback.answer()
+        return
+    
+    if data == "about_survey_skip":
+        # Skip current question - move to next
+        try:
+            token = await get_or_fetch_token(telegram_id, username, first_name)
+            if token:
+                state_data = await state.get_data()
+                section_id = state_data.get("survey_section_id")
+                
+                # Get all sections and find next question
+                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+                sections = sections_data.get("sections", []) if sections_data else []
+                
+                next_question = None
+                next_section_id = None
+                
+                # Find next unanswered question
+                for section in sections:
+                    section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
+                    questions = section_detail.get("section", {}).get("questions", [])
+                    
+                    for q in questions:
+                        next_question = q
+                        next_section_id = section.get("id")
+                        break
+                    
+                    if next_question:
+                        break
+                
+                if next_question:
+                    question_text = next_question.get("question_text", "")
+                    is_optional = next_question.get("is_optional", False)
+                    
+                    await state.update_data(
+                        survey_section_id=next_section_id,
+                        survey_question_id=next_question.get("id")
+                    )
+                    
+                    await callback.message.edit_text(
+                        f"👣 Пройти мини-опрос\n\n"
+                        f"❓ {question_text}",
+                        reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                    )
+                else:
+                    await state.clear()
+                    await callback.message.edit_text(
+                        "✅ Мини-опрос завершён!\n\n"
+                        "Спасибо за ответы.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+        except Exception as e:
+            logger.exception("Error skipping question: %s", e)
+            await callback.answer("Ошибка при пропуске вопроса")
+        await callback.answer()
+        return
+    
+    if data == "about_survey_pause":
+        # Pause survey
+        await state.clear()
         await callback.message.edit_text(
-            f"🗃️ История записей\n\n"
-            "(История пока пуста или функция в разработке)",
-            reply_markup=build_about_section_actions_markup(section)
+            "⏸ Мини-опрос поставлен на паузу.\n\n"
+            "Можешь продолжить позже.",
+            reply_markup=build_about_me_main_markup()
         )
         await callback.answer()
+        return
+    
+    if data == "about_survey_save":
+        # Save and continue - this button should only appear after user entered answer
+        # The actual save happens in handle_profile_answer
+        await callback.answer("Введи ответ на вопрос выше, затем он автоматически сохранится")
         return
     
     await callback.answer()
@@ -1740,16 +2074,40 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
         await callback.answer("Ошибка авторизации")
         return
     
-    if data == "progress_steps_list":
-        # Show list of all steps with progress
+    if data == "progress_main" or data == "step_progress":
+        # Show main progress menu with steps and "View answers" button
         try:
             steps_list = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_list.get("steps", []) if steps_list else []
             
+            # Get progress for each step
+            steps_with_progress = []
+            for step in steps:
+                step_id = step.get("id")
+                questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                questions = questions_data.get("questions", []) if questions_data else []
+                answered = sum(1 for q in questions if q.get("status") == "COMPLETED")
+                total = len(questions)
+                
+                step_info = questions_data.get("step", {}) if questions_data else {}
+                step_number = step_info.get("number", step.get("number", step_id))
+                step_title = step_info.get("title", step.get("title", ""))
+                
+                steps_with_progress.append({
+                    "id": step_id,
+                    "number": step_number,
+                    "title": step_title,
+                    "answered_questions": answered,
+                    "total_questions": total
+                })
+            
+            progress_text = "📋 Мой прогресс\n\n"
+            for step in steps_with_progress:
+                progress_text += f"🪜 Шаг {step['number']} — {step['title']} ({step['answered_questions']}/{step['total_questions']})\n"
+            
             await callback.message.edit_text(
-                "📋 Мой прогресс\n\n"
-                "Выбери шаг для просмотра:",
-                reply_markup=build_progress_steps_list_markup(steps)
+                progress_text,
+                reply_markup=build_progress_main_markup(steps_with_progress)
             )
         except Exception as e:
             logger.exception("Error loading steps: %s", e)
@@ -1758,10 +2116,10 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
         return
     
     if data.startswith("progress_step_"):
+        # Show step details
         step_id = int(data.replace("progress_step_", ""))
         
         try:
-            # Get step info with questions
             questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
             questions = questions_data.get("questions", []) if questions_data else []
             step_info = questions_data.get("step", {}) if questions_data else {}
@@ -1771,53 +2129,56 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
             answered = sum(1 for q in questions if q.get("status") == "COMPLETED")
             total = len(questions)
             
-            # Build progress text
-            progress_text = f"🪜 Шаг {step_number} — {step_title}\n"
-            progress_text += f"Пройдено: {answered} из {total}\n\n"
-            
-            for i, q in enumerate(questions, 1):
-                q_text = q.get("text", "")[:40]
-                status = q.get("status", "")
-                answer_preview = q.get("answer_preview", "")
-                
-                if status == "COMPLETED":
-                    progress_text += f"✅ {i}. {q_text}...\n"
-                    if answer_preview:
-                        progress_text += f"   Ответ: \"{answer_preview[:50]}...\"\n"
-                elif answer_preview:
-                    progress_text += f"⏳ {i}. {q_text}...\n"
-                    progress_text += f"   (черновик сохранён)\n"
-                else:
-                    progress_text += f"⬜ {i}. {q_text}...\n"
-                progress_text += "\n"
+            progress_text = f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})\n\n"
+            progress_text += "Выбери действие:"
             
             await callback.message.edit_text(
                 progress_text,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🗂 Выбрать вопрос", callback_data=f"progress_questions_{step_id}")],
-                    [InlineKeyboardButton(text="🔁 Сменить шаг", callback_data="progress_steps_list")],
-                    [InlineKeyboardButton(text="▶️ Продолжить работу", callback_data="steps_continue")],
-                    [InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")]
-                ])
+                reply_markup=build_progress_step_markup(step_id, step_number, step_title)
             )
         except Exception as e:
-            logger.exception("Error loading step progress: %s", e)
+            logger.exception("Error loading step: %s", e)
             await callback.answer("Ошибка загрузки")
         await callback.answer()
         return
     
-    if data.startswith("progress_questions_"):
-        step_id = int(data.replace("progress_questions_", ""))
-        
+    if data == "progress_view_answers":
+        # Show step selection for viewing answers
         try:
-            # Get questions for selection
-            questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
-            questions = questions_data.get("questions", []) if questions_data else []
+            steps_list = await BACKEND_CLIENT.get_steps_list(token)
+            steps = steps_list.get("steps", []) if steps_list else []
             
             await callback.message.edit_text(
-                "🗂 Выбери вопрос:\n\n"
-                "Нажми на вопрос, чтобы начать работу с ним.",
-                reply_markup=build_progress_questions_markup(questions, step_id)
+                "📄 Посмотреть ответы\n\n"
+                "Выбери номер шага:",
+                reply_markup=build_progress_view_answers_steps_markup(steps)
+            )
+        except Exception as e:
+            logger.exception("Error loading steps: %s", e)
+            await callback.answer("Ошибка загрузки")
+        await callback.answer()
+        return
+    
+    if data.startswith("progress_answers_step_"):
+        # Show question selection for a step
+        step_id = int(data.replace("progress_answers_step_", ""))
+        
+        try:
+            questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+            questions = questions_data.get("questions", []) if questions_data else []
+            step_info = questions_data.get("step", {}) if questions_data else {}
+            
+            step_number = step_info.get("number", step_id)
+            step_title = step_info.get("title", "")
+            
+            # Store step_id in state for back navigation
+            await state.update_data(progress_view_step_id=step_id)
+            
+            await callback.message.edit_text(
+                f"📄 Посмотреть ответы\n\n"
+                f"Шаг {step_number} — {step_title}\n"
+                f"Выбери номер вопроса:",
+                reply_markup=build_progress_view_answers_questions_markup(questions, step_id)
             )
         except Exception as e:
             logger.exception("Error loading questions: %s", e)
@@ -1825,46 +2186,76 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
         await callback.answer()
         return
     
-    if data.startswith("progress_select_q_"):
-        question_id = int(data.replace("progress_select_q_", ""))
+    if data.startswith("progress_answers_question_"):
+        # Show answer for selected question
+        question_id = int(data.replace("progress_answers_question_", ""))
         
         try:
-            # Switch to this question
-            result = await BACKEND_CLIENT.switch_to_question(token, question_id)
-            if result:
-                # Get the question and show it
-                step_data = await get_current_step_question(telegram_id, username, first_name)
-                if step_data:
-                    response_text = step_data.get("message", "")
-                    step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            # Get previous answer
+            answer_data = await BACKEND_CLIENT.get_previous_answer(token, question_id)
+            answer_text = answer_data.get("answer_text", "") if answer_data else ""
+            
+            # Get step_id from state or find it
+            state_data = await state.get_data()
+            step_id_for_back = state_data.get("progress_view_step_id")
+            
+            # Get question info
+            current_question = None
+            if step_id_for_back:
+                questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id_for_back)
+                questions = questions_data.get("questions", []) if questions_data else []
+                for q in questions:
+                    if q.get("id") == question_id:
+                        current_question = q
+                        break
+            
+            # If not found, search all steps
+            if not current_question:
+                steps_list = await BACKEND_CLIENT.get_steps_list(token)
+                steps = steps_list.get("steps", []) if steps_list else []
+                
+                for step in steps:
+                    step_id = step.get("id")
+                    questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                    questions = questions_data.get("questions", []) if questions_data else []
                     
-                    if step_info:
-                        progress_indicator = format_step_progress_indicator(
-                            step_number=step_info.get("step_number", 0),
-                            total_steps=step_info.get("total_steps", 12),
-                            step_title=step_info.get("step_title"),
-                            answered_questions=step_info.get("answered_questions", 0),
-                            total_questions=step_info.get("total_questions", 0)
-                        )
-                        full_text = f"{progress_indicator}\n\n❔{response_text}"
-                    else:
-                        full_text = f"❔{response_text}"
+                    for q in questions:
+                        if q.get("id") == question_id:
+                            current_question = q
+                            if not step_id_for_back:
+                                step_id_for_back = step_id
+                            break
                     
-                    # Store step description in state
-                    await state.update_data(step_description=step_info.get("step_description", "") if step_info else "")
-                    
-                    await callback.message.edit_text(
-                        full_text,
-                        reply_markup=build_step_actions_markup(show_description=False)
-                    )
-                    await state.set_state(StepState.answering)
-                else:
-                    await callback.answer("Ошибка загрузки вопроса")
+                    if current_question:
+                        break
+            
+            if current_question:
+                question_text = current_question.get("text", "Вопрос")
             else:
-                await callback.answer("Не удалось переключиться на вопрос")
+                question_text = "Вопрос"
+            
+            if answer_text:
+                display_text = (
+                    f"📄 Ответ\n\n"
+                    f"❓ {question_text}\n\n"
+                    f"💬 Твой ответ:\n\n{answer_text}"
+                )
+            else:
+                display_text = (
+                    f"📄 Ответ\n\n"
+                    f"❓ {question_text}\n\n"
+                    f"💬 Ответ пока не сохранён."
+                )
+            
+            back_button = [InlineKeyboardButton(text="◀️ Назад к вопросам", callback_data=f"progress_answers_step_{step_id_for_back}")] if step_id_for_back else []
+            
+            await callback.message.edit_text(
+                display_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[back_button] if back_button else [])
+            )
         except Exception as e:
-            logger.exception("Error selecting question: %s", e)
-            await callback.answer("Ошибка")
+            logger.exception("Error loading answer: %s", e)
+            await callback.answer("Ошибка загрузки ответа")
         await callback.answer()
         return
     
@@ -1926,8 +2317,6 @@ async def handle_day(message: Message, state: FSMContext) -> None:
         )
         if question_subtext:
             question_msg += f"\n{question_subtext}\n"
-        
-        question_msg += f"\n{data.get('progress_summary', '')}"
         
         # Set FSM state
         await state.set_state(Step10States.answering_question)
@@ -2024,8 +2413,6 @@ async def handle_step10_answer(message: Message, state: FSMContext) -> None:
         )
         if next_question_subtext:
             next_question_msg += f"\n{next_question_subtext}\n"
-        
-        next_question_msg += f"\n{data.get('progress_summary', '')}"
         
         # Build markup
         markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -2266,49 +2653,114 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
             return
         
         state_data = await state.get_data()
-        section_id = state_data.get("section_id")
-        question_id = state_data.get("current_question_id")
-        questions = state_data.get("questions", [])
-        question_index = state_data.get("question_index", 0)
+        survey_mode = state_data.get("survey_mode", False)
         
-        if not section_id or not question_id:
-            await message.answer("Ошибка: не найден вопрос. Начни заново с /profile")
-            await state.clear()
-            return
-        
-        # Submit answer
-        result = await BACKEND_CLIENT.submit_profile_answer(
-            token, section_id, question_id, answer_text
-        )
-        
-        # Check if there's a next question
-        next_question = result.get("next_question")
-        
-        if next_question:
-            # Show next question
-            next_question_text = next_question.get("text", "")
-            await state.update_data(
-                current_question_id=next_question.get("id"),
-                question_index=question_index + 1
+        if survey_mode:
+            # Handle mini survey mode
+            section_id = state_data.get("survey_section_id")
+            question_id = state_data.get("survey_question_id")
+            
+            if not section_id or not question_id:
+                await message.answer("Ошибка: не найден вопрос.")
+                await state.clear()
+                return
+            
+            # Submit answer
+            result = await BACKEND_CLIENT.submit_profile_answer(
+                token, section_id, question_id, answer_text
             )
             
-            markup = build_profile_actions_markup(section_id)
-            if next_question.get("is_optional"):
-                skip_markup = build_profile_skip_markup()
-                markup.inline_keyboard.append(skip_markup.inline_keyboard[0])
+            # Get next question from all sections
+            sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+            sections = sections_data.get("sections", []) if sections_data else []
             
-            await send_long_message(
-                message,
-                f"✅ Ответ сохранён!\n\nСледующий вопрос:\n\n{next_question_text}",
-                reply_markup=markup
-            )
+            next_question = None
+            next_section_id = None
+            
+            # Find next unanswered question across all sections
+            for section in sections:
+                section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
+                questions = section_detail.get("section", {}).get("questions", [])
+                
+                for q in questions:
+                    # Check if question is answered (simplified - in real implementation check answer status)
+                    next_question = q
+                    next_section_id = section.get("id")
+                    break
+                
+                if next_question:
+                    break
+            
+            if next_question:
+                # Show next question
+                question_text = next_question.get("question_text", "")
+                is_optional = next_question.get("is_optional", False)
+                
+                await state.update_data(
+                    survey_section_id=next_section_id,
+                    survey_question_id=next_question.get("id")
+                )
+                
+                await send_long_message(
+                    message,
+                    f"✅ Ответ сохранён!\n\n"
+                    f"👣 Пройти мини-опрос\n\n"
+                    f"❓ {question_text}",
+                    reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                )
+            else:
+                # All questions answered
+                await state.clear()
+                await message.answer(
+                    "✅ Мини-опрос завершён!\n\n"
+                    "Спасибо за ответы.",
+                    reply_markup=build_about_me_main_markup()
+                )
         else:
-            # All questions answered
-            await message.answer(
-                "✅ Все вопросы в этом разделе отвечены!",
-                reply_markup=build_profile_actions_markup(section_id)
+            # Handle regular profile mode
+            section_id = state_data.get("section_id")
+            question_id = state_data.get("current_question_id")
+            questions = state_data.get("questions", [])
+            question_index = state_data.get("question_index", 0)
+            
+            if not section_id or not question_id:
+                await message.answer("Ошибка: не найден вопрос. Начни заново с /profile")
+                await state.clear()
+                return
+            
+            # Submit answer
+            result = await BACKEND_CLIENT.submit_profile_answer(
+                token, section_id, question_id, answer_text
             )
-            await state.set_state(ProfileStates.section_selection)
+            
+            # Check if there's a next question
+            next_question = result.get("next_question")
+            
+            if next_question:
+                # Show next question
+                next_question_text = next_question.get("text", "")
+                await state.update_data(
+                    current_question_id=next_question.get("id"),
+                    question_index=question_index + 1
+                )
+                
+                markup = build_profile_actions_markup(section_id)
+                if next_question.get("is_optional"):
+                    skip_markup = build_profile_skip_markup()
+                    markup.inline_keyboard.append(skip_markup.inline_keyboard[0])
+                
+                await send_long_message(
+                    message,
+                    f"✅ Ответ сохранён!\n\nСледующий вопрос:\n\n{next_question_text}",
+                    reply_markup=markup
+                )
+            else:
+                # All questions answered
+                await message.answer(
+                    "✅ Все вопросы в этом разделе отвечены!",
+                    reply_markup=build_profile_actions_markup(section_id)
+                )
+                await state.set_state(ProfileStates.section_selection)
             
     except Exception as exc:
         logger.exception("Error handling profile answer for %s: %s", telegram_id, exc)
@@ -2917,7 +3369,60 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             return
         
         if data == "step_continue":
-            # Continue working - just show current question again
+            # Continue working - open answer mode
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            if not step_info:
+                await callback.answer("Не удалось получить информацию о шаге")
+                return
+            
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if step_data:
+                response_text = step_data.get("message", "")
+                if response_text:
+                    progress_indicator = format_step_progress_indicator(
+                        step_number=step_info.get("step_number"),
+                        total_steps=step_info.get("total_steps", 12),
+                        step_title=step_info.get("step_title"),
+                        answered_questions=step_info.get("answered_questions", 0),
+                        total_questions=step_info.get("total_questions", 0)
+                    )
+                    
+                    # Check if there's a draft
+                    draft_data = await BACKEND_CLIENT.get_draft(token)
+                    draft_text = draft_data.get("draft", "") if draft_data else ""
+                    
+                    if draft_text:
+                        full_text = (
+                            f"{progress_indicator}\n\n"
+                            f"❔{response_text}\n\n"
+                            f"📝 Поле для ответа:\n"
+                            f"💾 Черновик: {draft_text[:100]}{'...' if len(draft_text) > 100 else ''}"
+                        )
+                    else:
+                        full_text = (
+                            f"{progress_indicator}\n\n"
+                            f"❔{response_text}\n\n"
+                            f"📝 Поле для ответа:\n"
+                            f"[Введи свой ответ здесь]"
+                        )
+                    
+                    # Store step description and question info in state
+                    await state.update_data(
+                        step_description=step_info.get("step_description", ""),
+                        current_draft=draft_text
+                    )
+                    
+                    await edit_long_message(
+                        callback,
+                        full_text,
+                        reply_markup=build_step_answer_mode_markup()
+                    )
+                    await state.set_state(StepState.answer_mode)
+                    await callback.answer()
+            return
+        
+        if data == "step_back_from_answer":
+            # Return to step actions menu
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
             if not step_info:
                 await callback.answer("Не удалось получить информацию о шаге")
@@ -2936,7 +3441,6 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                     )
                     full_text = f"{progress_indicator}\n\n❔{response_text}"
                     
-                    # Store step description in state
                     await state.update_data(step_description=step_info.get("step_description", ""))
                     
                     await edit_long_message(
@@ -2946,6 +3450,102 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                     )
                     await state.set_state(StepState.answering)
                     await callback.answer()
+            return
+        
+        if data == "step_save_draft":
+            # Save draft - prompt user to enter text
+            await state.update_data(action="save_draft")
+            await callback.message.edit_text(
+                "💾 Сохранить черновик\n\n"
+                "Введи текст черновика и отправь его:"
+            )
+            await callback.answer()
+            return
+        
+        if data == "step_edit_last":
+            # Edit last answer - get previous answer
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if not step_data:
+                await callback.answer("Нет активного вопроса")
+                return
+            
+            # Get question ID from active tail
+            questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
+            questions = questions_data.get("questions", []) if questions_data else []
+            current_question_text = step_data.get("message", "")
+            question_id = None
+            for q in questions:
+                if q.get("text") == current_question_text:
+                    question_id = q.get("id")
+                    break
+            
+            if question_id:
+                prev_answer_data = await BACKEND_CLIENT.get_previous_answer(token, question_id)
+                prev_answer = prev_answer_data.get("answer_text", "") if prev_answer_data else ""
+                
+                if prev_answer:
+                    step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                    progress_indicator = format_step_progress_indicator(
+                        step_number=step_info.get("step_number"),
+                        total_steps=step_info.get("total_steps", 12),
+                        step_title=step_info.get("step_title"),
+                        answered_questions=step_info.get("answered_questions", 0),
+                        total_questions=step_info.get("total_questions", 0)
+                    )
+                    
+                    await callback.message.edit_text(
+                        f"{progress_indicator}\n\n"
+                        f"❔{current_question_text}\n\n"
+                        f"✏️ Редактировать последний ответ:\n\n"
+                        f"Предыдущий ответ:\n{prev_answer}\n\n"
+                        f"Введи новый ответ:",
+                        reply_markup=build_step_answer_mode_markup()
+                    )
+                    await state.update_data(action="edit_answer", previous_answer=prev_answer)
+                    await callback.answer()
+                else:
+                    await callback.answer("Предыдущий ответ не найден")
+            else:
+                await callback.answer("Не удалось определить вопрос")
+            return
+        
+        if data == "step_reset_draft":
+            # Reset draft - clear current draft
+            await BACKEND_CLIENT.save_draft(token, "")
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            if step_data:
+                response_text = step_data.get("message", "")
+                if response_text:
+                    progress_indicator = format_step_progress_indicator(
+                        step_number=step_info.get("step_number"),
+                        total_steps=step_info.get("total_steps", 12),
+                        step_title=step_info.get("step_title"),
+                        answered_questions=step_info.get("answered_questions", 0),
+                        total_questions=step_info.get("total_questions", 0)
+                    )
+                    full_text = (
+                        f"{progress_indicator}\n\n"
+                        f"❔{response_text}\n\n"
+                        f"📝 Поле для ответа:\n"
+                        f"[Поле очищено]"
+                    )
+                    await state.update_data(current_draft="")
+                    await callback.message.edit_text(
+                        full_text,
+                        reply_markup=build_step_answer_mode_markup()
+                    )
+            await callback.answer("Поле очищено")
+            return
+        
+        if data == "step_complete":
+            # Complete and move to next - prompt to enter final answer
+            await state.update_data(action="complete")
+            await callback.message.edit_text(
+                "✔️ Завершить и перейти\n\n"
+                "Введи финальный ответ и отправь его. После этого ответ будет сохранён и ты перейдёшь к следующему вопросу:"
+            )
+            await callback.answer()
             return
         
         if data == "step_toggle_description":
@@ -2978,9 +3578,9 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 full_text = f"{progress_indicator}\n\n❔{response_text}"
                 new_show_description = False
             else:
-                # Show description
+                # Show description - only description, no extra text
                 if step_description:
-                    full_text = f"{progress_indicator}\n\n📘 Шаг {step_info.get('step_number')} — {step_info.get('step_title', '')}\n\n{step_description}\n\n❔{response_text}"
+                    full_text = f"{progress_indicator}\n\n{step_description}\n\n❔{response_text}"
                 else:
                     full_text = f"{progress_indicator}\n\n❔{response_text}"
                     await callback.answer("Описание шага пока не добавлено")
@@ -3006,16 +3606,11 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             
             await callback.message.edit_text(
                 progress_text,
-                reply_markup=build_progress_steps_list_markup(steps)
+                reply_markup=build_progress_main_markup(steps)
             )
             await callback.answer()
             return
         
-        elif data == "step_pause":
-            # Pause and save draft - return to steps panel
-            await state.update_data(action="pause")
-            await callback.answer("Напиши текст для черновика и отправь его")
-            
         elif data == "step_template":
             # Start FSM template filling mode using backend API
             # Get current step info to get step_id and question_id

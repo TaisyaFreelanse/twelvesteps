@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, desc
 from db.models import (
     User, ProfileAnswer, ProfileQuestion, ProfileSection, ProfileSectionData,
-    StepAnswer, Question, Step, Message, SenderRole
+    StepAnswer, Question, Step, Message, SenderRole, Gratitude
 )
 from repositories.UserRepository import UserRepository
 
@@ -207,7 +207,27 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
         steps_summary += "Пользователь еще не начал работу по шагам.\n\n"
     
     # ============================================================
-    # 3. COLLECT REGULAR CHAT MESSAGES (from everyday conversations)
+    # 3. COLLECT GRATITUDES
+    # ============================================================
+    gratitudes_stmt = (
+        select(Gratitude.text, Gratitude.created_at)
+        .where(Gratitude.user_id == user_id)
+        .order_by(desc(Gratitude.created_at))
+        .limit(20)
+    )
+    gratitudes_result = await session.execute(gratitudes_stmt)
+    gratitudes = gratitudes_result.all()
+    
+    gratitudes_summary = "=== БЛАГОДАРНОСТИ ===\n\n"
+    if gratitudes:
+        gratitudes_summary += "Записи благодарностей пользователя:\n"
+        for text, created_at in gratitudes:
+            gratitudes_summary += f"- {text}\n"
+    else:
+        gratitudes_summary += "Пользователь еще не записывал благодарности.\n\n"
+    
+    # ============================================================
+    # 4. COLLECT REGULAR CHAT MESSAGES (from everyday conversations)
     # ============================================================
     chat_summary = "=== ИНФОРМАЦИЯ ИЗ ОБЫЧНОГО ОБЩЕНИЯ ===\n\n"
     
@@ -238,10 +258,10 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
         chat_summary += "Пользователь еще не общался в обычном режиме.\n\n"
     
     # ============================================================
-    # 4. BUILD COMPLETE PERSONALIZED PROMPT
+    # 5. BUILD COMPLETE PERSONALIZED PROMPT
     # ============================================================
-    # Combine all information: onboarding -> profile -> steps -> chat
-    complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{chat_summary}"
+    # Combine all information: onboarding -> profile -> steps -> gratitudes -> chat
+    complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{gratitudes_summary}\n\n{chat_summary}"
     
     # Add instruction for bot
     instruction = """=== ИНСТРУКЦИЯ ДЛЯ БОТА ===
