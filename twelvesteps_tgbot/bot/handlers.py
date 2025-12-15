@@ -1677,27 +1677,34 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
     """Handle profile settings callbacks"""
     data = callback.data
     
-    if data == "profile_settings_back":
-        # Back to main settings
-        await callback.message.edit_text(
-            "⚙️ Настройки\n\n"
-            "Выбери раздел настроек:",
-            reply_markup=build_main_settings_markup()
-        )
+    try:
+        if data == "profile_settings_back":
+            # Back to main settings
+            await callback.message.edit_text(
+                "⚙️ Настройки\n\n"
+                "Выбери раздел настроек:",
+                reply_markup=build_main_settings_markup()
+            )
+            await callback.answer()
+            return
+        
+        if data == "profile_settings_about":
+            # Show main menu for "Tell about yourself"
+            await callback.answer("Загружаю меню...")
+            await callback.message.edit_text(
+                "🪪 Расскажи о себе\n\n"
+                "Выбери способ:",
+                reply_markup=build_about_me_main_markup()
+            )
+            return
+        
         await callback.answer()
-        return
-    
-    if data == "profile_settings_about":
-        # Show main menu for "Tell about yourself"
-        await callback.message.edit_text(
-            "🪪 Расскажи о себе\n\n"
-            "Выбери способ:",
-            reply_markup=build_about_me_main_markup()
-        )
-        await callback.answer()
-        return
-    
-    await callback.answer()
+    except Exception as e:
+        logger.exception("Error in handle_profile_settings_callback: %s", e)
+        try:
+            await callback.answer("Ошибка. Попробуй позже.")
+        except:
+            pass
 
 
 async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1707,198 +1714,206 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
     username = callback.from_user.username
     first_name = callback.from_user.first_name
     
-    if data == "about_free_story":
-        # Show free story section
-        await callback.message.edit_text(
-            "✍️ Свободный рассказ\n\n"
-            "Здесь ты можешь свободно рассказать о себе.",
-            reply_markup=build_free_story_markup()
-        )
-        await callback.answer()
-        return
-    
-    if data == "about_add_free":
-        # Add free story entry
-        await state.update_data(about_section="about_free")
-        await state.set_state(AboutMeStates.adding_entry)
-        
-        await callback.message.edit_text(
-            "✍️ Свободный рассказ\n\n"
-            "Напиши то, что хочешь добавить:"
-        )
-        await callback.answer()
-        return
-    
-    if data == "about_history_free":
-        # View free story history
-        try:
-            token = await get_or_fetch_token(telegram_id, username, first_name)
-            if token:
-                # TODO: Load history from backend
-                history_text = "🗃️ История\n\n(История пока пуста)"
-                await callback.message.edit_text(
-                    history_text,
-                    reply_markup=build_free_story_markup()
-                )
-        except Exception as e:
-            logger.exception("Error loading history: %s", e)
+    try:
+        if data == "about_free_story":
+            # Show free story section
+            await callback.answer()
             await callback.message.edit_text(
-                "🗃️ История\n\n(История пока пуста)",
+                "✍️ Свободный рассказ\n\n"
+                "Здесь ты можешь свободно рассказать о себе.",
                 reply_markup=build_free_story_markup()
             )
-        await callback.answer()
-        return
+            return
     
-    if data == "about_mini_survey":
-        # Start mini survey
-        try:
-            token = await get_or_fetch_token(telegram_id, username, first_name)
-            if not token:
-                await callback.answer("Ошибка авторизации")
-                return
+        if data == "about_add_free":
+            # Add free story entry
+            await callback.answer()
+            await state.update_data(about_section="about_free")
+            await state.set_state(AboutMeStates.adding_entry)
             
-            # Show loading message
+            await callback.message.edit_text(
+                "✍️ Свободный рассказ\n\n"
+                "Напиши то, что хочешь добавить:"
+            )
+            return
+        
+        if data == "about_history_free":
+            # View free story history
+            await callback.answer()
+            try:
+                token = await get_or_fetch_token(telegram_id, username, first_name)
+                if token:
+                    # TODO: Load history from backend
+                    history_text = "🗃️ История\n\n(История пока пуста)"
+                    await callback.message.edit_text(
+                        history_text,
+                        reply_markup=build_free_story_markup()
+                    )
+            except Exception as e:
+                logger.exception("Error loading history: %s", e)
+                await callback.message.edit_text(
+                    "🗃️ История\n\n(История пока пуста)",
+                    reply_markup=build_free_story_markup()
+                )
+            return
+    
+        if data == "about_mini_survey":
+            # Start mini survey
             await callback.answer("Загружаю вопросы...")
             
-            # Get first section with questions - optimize by getting only first section
-            sections_data = await BACKEND_CLIENT.get_profile_sections(token)
-            sections = sections_data.get("sections", []) if sections_data else []
-            
-            if not sections:
-                await callback.message.edit_text(
-                    "👣 Пройти мини-опрос\n\n"
-                    "Вопросы пока не доступны.",
-                    reply_markup=build_about_me_main_markup()
-                )
-                await callback.answer()
-                return
-            
-            # Get first section only (optimize - don't loop through all)
-            first_section = sections[0] if sections else None
-            if not first_section:
-                await callback.message.edit_text(
-                    "👣 Пройти мини-опрос\n\n"
-                    "Вопросы пока не доступны.",
-                    reply_markup=build_about_me_main_markup()
-                )
-                await callback.answer()
-                return
-            
-            # Get section detail for first section only
-            section_detail = await BACKEND_CLIENT.get_section_detail(token, first_section.get("id"))
-            questions = section_detail.get("section", {}).get("questions", []) if section_detail else []
-            
-            if not questions:
-                await callback.message.edit_text(
-                    "👣 Пройти мини-опрос\n\n"
-                    "Вопросы пока не доступны.",
-                    reply_markup=build_about_me_main_markup()
-                )
-                await callback.answer()
-                return
-            
-            first_question = questions[0]
-            section_id = first_section.get("id")
-            
-            # Store survey state
-            await state.update_data(
-                survey_section_id=section_id,
-                survey_question_id=first_question.get("id"),
-                survey_question_index=0,
-                survey_mode=True
-            )
-            await state.set_state(ProfileStates.answering_question)
-            
-            question_text = first_question.get("question_text", "")
-            is_optional = first_question.get("is_optional", False)
-            
-            await callback.message.edit_text(
-                f"👣 Пройти мини-опрос\n\n"
-                f"❓ {question_text}",
-                reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
-            )
-        except Exception as e:
-            logger.exception("Error starting survey: %s", e)
-            await callback.message.edit_text(
-                "❌ Ошибка загрузки опроса. Попробуй позже.",
-                reply_markup=build_about_me_main_markup()
-            )
-        await callback.answer()
-        return
-    
-    if data == "about_survey_skip":
-        # Skip current question - move to next
-        try:
-            token = await get_or_fetch_token(telegram_id, username, first_name)
-            if token:
-                state_data = await state.get_data()
-                section_id = state_data.get("survey_section_id")
+            try:
+                token = await get_or_fetch_token(telegram_id, username, first_name)
+                if not token:
+                    await callback.message.edit_text(
+                        "❌ Ошибка авторизации. Нажми /start.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                    return
                 
-                # Get all sections and find next question
+                # Get first section with questions - optimize by getting only first section
                 sections_data = await BACKEND_CLIENT.get_profile_sections(token)
                 sections = sections_data.get("sections", []) if sections_data else []
                 
-                next_question = None
-                next_section_id = None
-                
-                # Find next unanswered question
-                for section in sections:
-                    section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
-                    questions = section_detail.get("section", {}).get("questions", [])
-                    
-                    for q in questions:
-                        next_question = q
-                        next_section_id = section.get("id")
-                        break
-                    
-                    if next_question:
-                        break
-                
-                if next_question:
-                    question_text = next_question.get("question_text", "")
-                    is_optional = next_question.get("is_optional", False)
-                    
-                    await state.update_data(
-                        survey_section_id=next_section_id,
-                        survey_question_id=next_question.get("id")
-                    )
-                    
+                if not sections:
                     await callback.message.edit_text(
-                        f"👣 Пройти мини-опрос\n\n"
-                        f"❓ {question_text}",
-                        reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
-                    )
-                else:
-                    await state.clear()
-                    await callback.message.edit_text(
-                        "✅ Мини-опрос завершён!\n\n"
-                        "Спасибо за ответы.",
+                        "👣 Пройти мини-опрос\n\n"
+                        "Вопросы пока не доступны.",
                         reply_markup=build_about_me_main_markup()
                     )
-        except Exception as e:
-            logger.exception("Error skipping question: %s", e)
-            await callback.answer("Ошибка при пропуске вопроса")
+                    return
+                
+                # Get first section only (optimize - don't loop through all)
+                first_section = sections[0] if sections else None
+                if not first_section:
+                    await callback.message.edit_text(
+                        "👣 Пройти мини-опрос\n\n"
+                        "Вопросы пока не доступны.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                    return
+                
+                # Get section detail for first section only
+                section_detail = await BACKEND_CLIENT.get_section_detail(token, first_section.get("id"))
+                questions = section_detail.get("section", {}).get("questions", []) if section_detail else []
+                
+                if not questions:
+                    await callback.message.edit_text(
+                        "👣 Пройти мини-опрос\n\n"
+                        "Вопросы пока не доступны.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                    return
+                
+                first_question = questions[0]
+                section_id = first_section.get("id")
+                
+                # Store survey state
+                await state.update_data(
+                    survey_section_id=section_id,
+                    survey_question_id=first_question.get("id"),
+                    survey_question_index=0,
+                    survey_mode=True
+                )
+                await state.set_state(ProfileStates.answering_question)
+                
+                question_text = first_question.get("question_text", "")
+                is_optional = first_question.get("is_optional", False)
+                
+                await callback.message.edit_text(
+                    f"👣 Пройти мини-опрос\n\n"
+                    f"❓ {question_text}",
+                    reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
+                )
+            except Exception as e:
+                logger.exception("Error starting survey: %s", e)
+                await callback.message.edit_text(
+                    "❌ Ошибка загрузки опроса. Попробуй позже.",
+                    reply_markup=build_about_me_main_markup()
+                )
+            return
+    
+        if data == "about_survey_skip":
+            # Skip current question - move to next
+            await callback.answer("Пропускаю вопрос...")
+            try:
+                token = await get_or_fetch_token(telegram_id, username, first_name)
+                if token:
+                    state_data = await state.get_data()
+                    section_id = state_data.get("survey_section_id")
+                    
+                    # Get all sections and find next question
+                    sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+                    sections = sections_data.get("sections", []) if sections_data else []
+                    
+                    next_question = None
+                    next_section_id = None
+                    
+                    # Find next unanswered question
+                    for section in sections:
+                        section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
+                        questions = section_detail.get("section", {}).get("questions", [])
+                        
+                        for q in questions:
+                            next_question = q
+                            next_section_id = section.get("id")
+                            break
+                        
+                        if next_question:
+                            break
+                    
+                    if next_question:
+                        question_text = next_question.get("question_text", "")
+                        is_optional = next_question.get("is_optional", False)
+                        
+                        await state.update_data(
+                            survey_section_id=next_section_id,
+                            survey_question_id=next_question.get("id")
+                        )
+                        
+                        await callback.message.edit_text(
+                            f"👣 Пройти мини-опрос\n\n"
+                            f"❓ {question_text}",
+                            reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                        )
+                    else:
+                        await state.clear()
+                        await callback.message.edit_text(
+                            "✅ Мини-опрос завершён!\n\n"
+                            "Спасибо за ответы.",
+                            reply_markup=build_about_me_main_markup()
+                        )
+            except Exception as e:
+                logger.exception("Error skipping question: %s", e)
+                await callback.message.edit_text(
+                    "❌ Ошибка при пропуске вопроса. Попробуй позже.",
+                    reply_markup=build_about_me_main_markup()
+                )
+            return
+        
+        if data == "about_survey_pause":
+            # Pause survey
+            await callback.answer()
+            await state.clear()
+            await callback.message.edit_text(
+                "⏸ Мини-опрос поставлен на паузу.\n\n"
+                "Можешь продолжить позже.",
+                reply_markup=build_about_me_main_markup()
+            )
+            return
+        
+        if data == "about_survey_save":
+            # Save and continue - this button should only appear after user entered answer
+            # The actual save happens in handle_profile_answer
+            await callback.answer("Введи ответ на вопрос выше, затем он автоматически сохранится")
+            return
+        
         await callback.answer()
-        return
-    
-    if data == "about_survey_pause":
-        # Pause survey
-        await state.clear()
-        await callback.message.edit_text(
-            "⏸ Мини-опрос поставлен на паузу.\n\n"
-            "Можешь продолжить позже.",
-            reply_markup=build_about_me_main_markup()
-        )
-        await callback.answer()
-        return
-    
-    if data == "about_survey_save":
-        # Save and continue - this button should only appear after user entered answer
-        # The actual save happens in handle_profile_answer
-        await callback.answer("Введи ответ на вопрос выше, затем он автоматически сохранится")
-        return
-    
-    await callback.answer()
+    except Exception as e:
+        logger.exception("Error in handle_about_callback: %s", e)
+        try:
+            await callback.answer("Ошибка. Попробуй позже.")
+        except:
+            pass
 
 
 async def handle_about_entry_input(message: Message, state: FSMContext) -> None:
