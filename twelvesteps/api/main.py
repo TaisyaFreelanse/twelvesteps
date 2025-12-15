@@ -104,6 +104,22 @@ load_dotenv(env_path)
 
 app = FastAPI(title="12STEPS Chat API")
 
+# Initialize profile sections on startup if they don't exist
+@app.on_event("startup")
+async def startup_event():
+    """Initialize profile sections on application startup"""
+    try:
+        from db.init_profile_sections import init_profile_sections
+        # Run in thread pool since init_profile_sections uses sync SQLAlchemy
+        import asyncio
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, init_profile_sections)
+        print("✅ Profile sections initialized (if needed)")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not initialize profile sections on startup: {e}")
+        import traceback
+        traceback.print_exc()
+
 def build_user_schema(user) -> UserSchema:
     """Build UserSchema from User model."""
     return UserSchema(
@@ -719,6 +735,14 @@ async def get_profile_sections(
     """Get all profile sections (standard + user's custom)"""
     service = ProfileService(current_user.session)
     sections = await service.get_all_sections(current_user.user.id)
+    
+    # Log for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Returning {len(sections)} sections for user {current_user.user.id}")
+    for section in sections:
+        logger.info(f"Section {section.id}: {section.name}, questions count: {len(section.questions) if hasattr(section, 'questions') else 'N/A'}")
+    
     return ProfileSectionListResponse(sections=sections)
 
 
