@@ -487,8 +487,8 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
                 full_response = f"✅ Ответ обновлён!\n\n❔{response_text}"
             
             await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
-                await state.update_data(action=None)
-                await state.set_state(StepState.answering)
+            await state.update_data(action=None)
+            await state.set_state(StepState.answering)
             
             if is_completed:
                 await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
