@@ -422,7 +422,7 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
         
         if action == "save_draft":
             # Save as draft
-                await BACKEND_CLIENT.save_draft(token, user_text)
+            await BACKEND_CLIENT.save_draft(token, user_text)
             await state.update_data(action=None, current_draft=user_text)
             
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
