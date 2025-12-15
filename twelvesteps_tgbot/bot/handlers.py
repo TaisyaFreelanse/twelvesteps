@@ -422,7 +422,7 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
         
         if action == "save_draft":
             # Save as draft
-            await BACKEND_CLIENT.save_draft(token, user_text)
+                await BACKEND_CLIENT.save_draft(token, user_text)
             await state.update_data(action=None, current_draft=user_text)
             
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
@@ -489,8 +489,8 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
                 full_response = f"✅ Ответ обновлён!\n\n❔{response_text}"
             
             await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
-            await state.update_data(action=None)
-            await state.set_state(StepState.answering)
+                await state.update_data(action=None)
+                await state.set_state(StepState.answering)
             
             if is_completed:
                 await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
@@ -1875,7 +1875,8 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                     survey_section_id=section_id,
                     survey_question_id=first_question.get("id"),
                     survey_question_index=0,
-                    survey_mode=True
+                    survey_mode=True,
+                    survey_is_generated=False
                 )
                 await state.set_state(ProfileStates.answering_question)
                 
@@ -1930,7 +1931,8 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                         
                         await state.update_data(
                             survey_section_id=next_section_id,
-                            survey_question_id=next_question.get("id")
+                            survey_question_id=next_question.get("id"),
+                            survey_is_generated=False
                         )
                         
                         await callback.message.edit_text(
@@ -2753,13 +2755,20 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
             # Handle mini survey mode
             section_id = state_data.get("survey_section_id")
             question_id = state_data.get("survey_question_id")
+            is_generated = state_data.get("survey_is_generated", False)
             
-            if not section_id or not question_id:
+            if not section_id:
+                await message.answer("Ошибка: не найден раздел.")
+                await state.clear()
+                return
+            
+            # For generated questions, question_id can be None
+            if not is_generated and not question_id:
                 await message.answer("Ошибка: не найден вопрос.")
                 await state.clear()
                 return
             
-            # Submit answer
+            # Submit answer (question_id can be None for generated questions)
             result = await BACKEND_CLIENT.submit_profile_answer(
                 token, section_id, question_id, answer_text
             )
@@ -2812,12 +2821,12 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                 )
         else:
             # Handle regular profile mode
-            section_id = state_data.get("section_id")
-            question_id = state_data.get("current_question_id")
+        section_id = state_data.get("section_id")
+        question_id = state_data.get("current_question_id")
             is_generated = state_data.get("is_generated_question", False)
-            questions = state_data.get("questions", [])
-            question_index = state_data.get("question_index", 0)
-            
+        questions = state_data.get("questions", [])
+        question_index = state_data.get("question_index", 0)
+        
             if not section_id:
                 await message.answer("Ошибка: не найден раздел. Начни заново с /profile")
                 await state.clear()
@@ -2825,27 +2834,27 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
             
             # For generated questions, question_id might be None
             if not is_generated and not question_id:
-                await message.answer("Ошибка: не найден вопрос. Начни заново с /profile")
-                await state.clear()
-                return
-            
+            await message.answer("Ошибка: не найден вопрос. Начни заново с /profile")
+            await state.clear()
+            return
+        
             # Submit answer (question_id can be None for generated questions)
-            result = await BACKEND_CLIENT.submit_profile_answer(
-                token, section_id, question_id, answer_text
-            )
-            
-            # Check if there's a next question
-            next_question = result.get("next_question")
-            
-            if next_question:
+        result = await BACKEND_CLIENT.submit_profile_answer(
+            token, section_id, question_id, answer_text
+        )
+        
+        # Check if there's a next question
+        next_question = result.get("next_question")
+        
+        if next_question:
                 # Show next question (can be basic or generated follow-up)
-                next_question_text = next_question.get("text", "")
+            next_question_text = next_question.get("text", "")
                 is_generated_next = next_question.get("is_generated", False)
                 next_question_id = next_question.get("id")
                 
                 if is_generated_next:
                     # Generated follow-up question
-                    await state.update_data(
+            await state.update_data(
                         current_question_id=None,  # No DB ID for generated questions
                         question_index=question_index + 1,
                         is_generated_question=True
@@ -2856,25 +2865,25 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                         current_question_id=next_question_id,
                         question_index=question_index + 1,
                         is_generated_question=False
-                    )
-                
-                markup = build_profile_actions_markup(section_id)
-                if next_question.get("is_optional"):
-                    skip_markup = build_profile_skip_markup()
-                    markup.inline_keyboard.append(skip_markup.inline_keyboard[0])
-                
-                await send_long_message(
-                    message,
-                    f"✅ Ответ сохранён!\n\nСледующий вопрос:\n\n{next_question_text}",
-                    reply_markup=markup
-                )
-            else:
+            )
+            
+            markup = build_profile_actions_markup(section_id)
+            if next_question.get("is_optional"):
+                skip_markup = build_profile_skip_markup()
+                markup.inline_keyboard.append(skip_markup.inline_keyboard[0])
+            
+            await send_long_message(
+                message,
+                f"✅ Ответ сохранён!\n\nСледующий вопрос:\n\n{next_question_text}",
+                reply_markup=markup
+            )
+        else:
                 # All questions answered (including follow-ups)
-                await message.answer(
-                    "✅ Все вопросы в этом разделе отвечены!",
-                    reply_markup=build_profile_actions_markup(section_id)
-                )
-                await state.set_state(ProfileStates.section_selection)
+            await message.answer(
+                "✅ Все вопросы в этом разделе отвечены!",
+                reply_markup=build_profile_actions_markup(section_id)
+            )
+            await state.set_state(ProfileStates.section_selection)
             
     except Exception as exc:
         logger.exception("Error handling profile answer for %s: %s", telegram_id, exc)
@@ -3709,7 +3718,7 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 reply_markup=build_step_actions_markup(show_description=new_show_description)
             )
             await callback.answer()
-            return
+                return
             
         elif data == "step_progress":
             # Show my progress - only menu with steps, no text list
@@ -4144,8 +4153,8 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                             total_questions=step_info.get("total_questions", 0)
                         )
                         full_text = f"{progress_indicator}\n\n{response_text}"
-                        await edit_long_message(
-                            callback,
+            await edit_long_message(
+                callback,
                             full_text,
                             reply_markup=build_step_actions_markup()
                         )
