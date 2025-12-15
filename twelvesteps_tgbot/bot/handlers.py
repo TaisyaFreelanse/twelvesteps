@@ -149,6 +149,15 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message(Command(commands=["qa_open"]))(qa_open)
     
     # 4. Profile Flow
+    # IMPORTANT: More specific handlers must be registered BEFORE general ones
+    # 4.9. Main Settings Flow (main_settings_ prefix) - register BEFORE profile_ to avoid conflicts
+    dp.callback_query(F.data.startswith("main_settings_"))(handle_main_settings_callback)
+    dp.callback_query(F.data.startswith("lang_"))(handle_language_callback)
+    dp.callback_query(F.data.startswith("step_settings_"))(handle_step_settings_callback)
+    dp.callback_query(F.data.startswith("profile_settings_"))(handle_profile_settings_callback)
+    dp.callback_query(F.data.startswith("about_"))(handle_about_callback)
+    
+    # Now register general profile_ handler (after profile_settings_)
     dp.callback_query(F.data.startswith("profile_"))(handle_profile_callback)
     dp.message(StateFilter(ProfileStates.answering_question))(handle_profile_answer)
     dp.message(StateFilter(ProfileStates.free_text_input))(handle_profile_free_text)
@@ -179,13 +188,6 @@ def register_handlers(dp: Dispatcher) -> None:
     
     # 4.8. Steps Settings Flow
     dp.callback_query(F.data.startswith("settings_"))(handle_steps_settings_callback)
-    
-    # 4.9. Main Settings Flow (main_settings_ prefix)
-    dp.callback_query(F.data.startswith("main_settings_"))(handle_main_settings_callback)
-    dp.callback_query(F.data.startswith("lang_"))(handle_language_callback)
-    dp.callback_query(F.data.startswith("step_settings_"))(handle_step_settings_callback)
-    dp.callback_query(F.data.startswith("profile_settings_"))(handle_profile_settings_callback)
-    dp.callback_query(F.data.startswith("about_"))(handle_about_callback)
     dp.message(StateFilter(AboutMeStates.adding_entry))(handle_about_entry_input)
     
     # 4.10. Progress Flow
@@ -420,7 +422,7 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
         
         if action == "save_draft":
             # Save as draft
-                await BACKEND_CLIENT.save_draft(token, user_text)
+            await BACKEND_CLIENT.save_draft(token, user_text)
             await state.update_data(action=None, current_draft=user_text)
             
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
@@ -487,8 +489,8 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
                 full_response = f"✅ Ответ обновлён!\n\n❔{response_text}"
             
             await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
-                await state.update_data(action=None)
-                await state.set_state(StepState.answering)
+            await state.update_data(action=None)
+            await state.set_state(StepState.answering)
             
             if is_completed:
                 await message.answer("Этап завершен! 🎉 Возвращаю в обычный режим.", reply_markup=build_main_menu_markup())
