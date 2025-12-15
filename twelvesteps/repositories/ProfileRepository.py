@@ -17,7 +17,9 @@ class ProfileRepository:
 
     async def get_all_sections(self, user_id: Optional[int] = None) -> List[ProfileSection]:
         """Get all sections (standard + user's custom sections if user_id provided)"""
-        query = select(ProfileSection).where(
+        query = select(ProfileSection).options(
+            selectinload(ProfileSection.questions)
+        ).where(
             (ProfileSection.is_custom == False) | (ProfileSection.user_id == user_id)
         ).order_by(ProfileSection.order_index)
         result = await self.db.execute(query)

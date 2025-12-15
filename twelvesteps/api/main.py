@@ -733,17 +733,26 @@ async def get_profile_sections(
     current_user: CurrentUserContext = Depends(get_current_user)
 ) -> ProfileSectionListResponse:
     """Get all profile sections (standard + user's custom)"""
-    service = ProfileService(current_user.session)
-    sections = await service.get_all_sections(current_user.user.id)
-    
-    # Log for debugging
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"Returning {len(sections)} sections for user {current_user.user.id}")
-    for section in sections:
-        logger.info(f"Section {section.id}: {section.name}, questions count: {len(section.questions) if hasattr(section, 'questions') else 'N/A'}")
-    
-    return ProfileSectionListResponse(sections=sections)
+    try:
+        service = ProfileService(current_user.session)
+        sections = await service.get_all_sections(current_user.user.id)
+        
+        # Log for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Returning {len(sections)} sections for user {current_user.user.id}")
+        for section in sections:
+            questions_count = len(section.questions) if hasattr(section, 'questions') and section.questions else 0
+            logger.info(f"Section {section.id}: {section.name}, questions count: {questions_count}")
+        
+        return ProfileSectionListResponse(sections=sections)
+    except Exception as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in get_profile_sections: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/profile/sections/{section_id}", response_model=ProfileSectionDetailResponse)
