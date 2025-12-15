@@ -3709,7 +3709,7 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 reply_markup=build_step_actions_markup(show_description=new_show_description)
             )
             await callback.answer()
-                return
+            return
             
         elif data == "step_progress":
             # Show my progress - only menu with steps, no text list
