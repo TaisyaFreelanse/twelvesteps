@@ -4152,9 +4152,9 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                             answered_questions=step_info.get("answered_questions", 0),
                             total_questions=step_info.get("total_questions", 0)
                         )
-                        full_text = f"{progress_indicator}\n\n{response_text}"
-            await edit_long_message(
-                callback,
+                        full_text = f"{progress_indicator}\n\n❔{response_text}"
+                        await edit_long_message(
+                            callback,
                             full_text,
                             reply_markup=build_step_actions_markup()
                         )
@@ -4166,7 +4166,6 @@ async def handle_steps_navigation_callback(callback: CallbackQuery, state: FSMCo
                 "🪜 Работа по шагу",
                 reply_markup=build_steps_navigation_markup()
             )
-            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
             return
         
         await callback.answer("Неизвестная команда")
