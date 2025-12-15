@@ -210,10 +210,12 @@ class BackendClient:
         return await self._request("GET", f"/profile/sections/{section_id}", token=access_token)
 
     async def submit_profile_answer(
-        self, access_token: str, section_id: int, question_id: int, answer_text: str
+        self, access_token: str, section_id: int, question_id: Optional[int], answer_text: str
     ) -> Dict[str, Any]:
-        """Submit answer to a profile question"""
-        payload = {"question_id": question_id, "answer_text": answer_text}
+        """Submit answer to a profile question (question_id can be None for generated questions)"""
+        payload = {"answer_text": answer_text}
+        if question_id is not None:
+            payload["question_id"] = question_id
         return await self._request(
             "POST", f"/profile/sections/{section_id}/answer", token=access_token, json=payload
         )

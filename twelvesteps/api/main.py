@@ -760,23 +760,42 @@ async def submit_profile_answer(
     """Save answer to a profile question and update personalized prompt"""
     service = ProfileService(current_user.session)
     
-    # Verify question belongs to section
-    section = await service.get_section_detail(section_id, current_user.user.id)
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-    
-    question_ids = [q.id for q in section.questions]
-    if answer_data.question_id not in question_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Question does not belong to this section"
+    # Verify question belongs to section (unless it's a generated question with id=None)
+    if answer_data.question_id is not None:
+        section = await service.get_section_detail(section_id, current_user.user.id)
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+        
+        question_ids = [q.id for q in section.questions]
+        if answer_data.question_id not in question_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Question does not belong to this section"
+            )
+        
+        answer, next_question = await service.save_answer(
+            current_user.user.id,
+            answer_data.question_id,
+            answer_data.answer_text
         )
-    
-    answer, next_question = await service.save_answer(
-        current_user.user.id,
-        answer_data.question_id,
-        answer_data.answer_text
-    )
+    else:
+        # Generated question - save as free text in section
+        section_data = await service.save_free_text(
+            current_user.user.id,
+            section_id,
+            f"[Сгенерированный вопрос]\n{answer_data.answer_text}"
+        )
+        # Try to generate next follow-up question
+        section = await service.get_section_detail(section_id, current_user.user.id)
+        if section:
+            next_question = await service.get_next_question_for_section(
+                current_user.user.id,
+                section_id,
+                answer_data.answer_text
+            )
+        else:
+            next_question = None
+        answer = None
     
     # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
     # This builds a complete picture of the user's character
@@ -789,16 +808,28 @@ async def submit_profile_answer(
     response = {
         "status": "success",
         "message": "Answer saved",
-        "answer_id": answer.id,
+        "answer_id": answer.id if answer else None,
     }
     
     # Add next question if available
     if next_question:
-        response["next_question"] = {
-            "id": next_question.id,
-            "text": next_question.question_text,
-            "is_optional": next_question.is_optional,
-        }
+        # Check if it's a generated question (id=-1) or regular question
+        if next_question.id == -1:
+            # Generated follow-up question
+            response["next_question"] = {
+                "id": None,  # No DB ID for generated questions
+                "text": next_question.question_text,
+                "is_optional": True,
+                "is_generated": True  # Flag to indicate it's generated
+            }
+        else:
+            # Regular question from DB
+            response["next_question"] = {
+                "id": next_question.id,
+                "text": next_question.question_text,
+                "is_optional": next_question.is_optional,
+                "is_generated": False
+            }
     else:
         response["message"] = "Answer saved. All questions in this section are completed."
     

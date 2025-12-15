@@ -159,8 +159,8 @@ class ProfileService:
     ) -> Optional[ProfileQuestion]:
         """
         Get next question for a section based on FSM logic.
-        If last_answer is provided, uses LLM to suggest the most relevant next question.
-        Otherwise, returns the first unanswered question.
+        If all basic questions are answered, generates a follow-up question using LLM.
+        Otherwise, returns the first unanswered basic question or suggests next based on answer.
         """
         section = await self.repo.get_section_by_id(section_id)
         if not section:
@@ -177,8 +177,19 @@ class ProfileService:
         # Find unanswered questions
         unanswered = [q for q in questions if q.id not in answered_question_ids]
         
+        # If all basic questions are answered, generate follow-up question
+        if not unanswered and last_answer:
+            try:
+                follow_up_question = await self._generate_follow_up_question(
+                    user_id, section, last_answer
+                )
+                return follow_up_question
+            except Exception as e:
+                print(f"[ProfileService] Error generating follow-up question: {e}")
+                return None  # All questions answered, no follow-up generated
+        
         if not unanswered:
-            return None  # All questions answered
+            return None  # All questions answered, but no last_answer to generate follow-up
         
         # If no last_answer provided, return first unanswered question
         if not last_answer:
@@ -203,6 +214,7 @@ class ProfileService:
     ) -> ProfileQuestion:
         """
         Use LLM to suggest the most relevant next question based on the user's answer.
+        This is used when there are still unanswered basic questions.
         """
         llm = OpenAI()
         
@@ -263,6 +275,110 @@ class ProfileService:
         except Exception as e:
             print(f"[ProfileService._suggest_next_question] Error: {e}")
             return unanswered_questions[0]
+    
+    async def _generate_follow_up_question(
+        self,
+        user_id: int,
+        section: ProfileSection,
+        last_answer: str
+    ) -> Optional[ProfileQuestion]:
+        """
+        Generate a follow-up question after all basic questions are answered.
+        Uses the profile_next_question prompt to create a contextual question.
+        Returns a temporary ProfileQuestion object (with id=-1 to indicate it's generated).
+        """
+        from repositories.PromptRepository import PromptRepository
+        from db.models import ProfileQuestion
+        
+        # Load the prompt
+        prompt_template = await PromptRepository.load_profile_next_question_prompt()
+        if not prompt_template:
+            return None
+        
+        # Get all answers for this section
+        user_answers = await self.repo.get_user_answers_for_section(user_id, section.id)
+        
+        # Build context: all answers in this section
+        answers_text = ""
+        for answer in user_answers:
+            # Get question text
+            from sqlalchemy import select
+            query = select(ProfileQuestion).where(ProfileQuestion.id == answer.question_id)
+            result = await self.session.execute(query)
+            question = result.scalar_one_or_none()
+            if question:
+                answers_text += f"Вопрос: {question.question_text}\n"
+                answers_text += f"Ответ: {answer.answer_text}\n\n"
+        
+        # Get personalized prompt for user context
+        from repositories.UserRepository import UserRepository
+        user_repo = UserRepository(self.session)
+        personalized_prompt = await user_repo.get_personalized_prompt(user_id) or "Нет персонализации."
+        
+        # Get frames related to this section (simplified - just use personalized prompt)
+        # In future, could query Frame table for section-related frames
+        
+        # Replace placeholders in prompt
+        prompt = prompt_template.replace("[НАЗВАНИЕ_БЛОКА]", section.name)
+        
+        # Build full prompt
+        full_prompt = f"""{prompt}
+
+## КОНТЕКСТ БЛОКА "{section.name}"
+
+### Все ответы в этом блоке:
+{answers_text}
+
+### Последний ответ:
+{last_answer}
+
+### Общее ядро личности:
+{personalized_prompt[:1000]}...
+
+### Уже заданные вопросы в этом блоке:
+{chr(10).join([f"- {q.question_text}" for q in section.questions])}
+
+---
+
+Сформулируй уточняющий вопрос (или верни пустую строку, если не нужен)."""
+
+        try:
+            from openai import AsyncOpenAI
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            
+            async with AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")) as client:
+                response = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Ты помогаешь формулировать уточняющие вопросы для психологического профиля."},
+                        {"role": "user", "content": full_prompt}
+                    ],
+                    max_tokens=150,
+                    temperature=0.7,
+                )
+            
+            generated_question = response.choices[0].message.content.strip()
+            
+            # If empty or too short, return None
+            if not generated_question or len(generated_question) < 10:
+                return None
+            
+            # Create a temporary ProfileQuestion object
+            # Use id=-1 to indicate it's a generated question (not from DB)
+            temp_question = ProfileQuestion(
+                id=-1,  # Special ID for generated questions
+                section_id=section.id,
+                question_text=generated_question,
+                order_index=999,  # High order to indicate it's after basic questions
+                is_optional=True
+            )
+            return temp_question
+            
+        except Exception as e:
+            print(f"[ProfileService._generate_follow_up_question] Error: {e}")
+            return None
 
     async def get_fsm_state(
         self, user_id: int, section_id: int

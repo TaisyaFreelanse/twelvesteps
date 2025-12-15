@@ -170,3 +170,15 @@ class PromptRepository:
                 return json.loads(content).get("prompt", "")
         except FileNotFoundError:
             return None
+    
+    @staticmethod
+    async def load_profile_next_question_prompt():
+        """
+        Loads the prompt for generating next question after basic questions in profile section.
+        """
+        try:
+            async with aiofiles.open("./llm/prompts/profile_next_question.json", "r", encoding="utf-8") as f:
+                content = await f.read()
+                return json.loads(content).get("prompt", "")
+        except FileNotFoundError:
+            return None

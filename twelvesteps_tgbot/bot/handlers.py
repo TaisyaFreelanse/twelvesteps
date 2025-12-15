@@ -1753,60 +1753,76 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
         # Start mini survey
         try:
             token = await get_or_fetch_token(telegram_id, username, first_name)
-            if token:
-                # Get first question from profile sections
-                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
-                sections = sections_data.get("sections", []) if sections_data else []
-                
-                if not sections:
-                    await callback.message.edit_text(
-                        "👣 Пройти мини-опрос\n\n"
-                        "Вопросы пока не доступны.",
-                        reply_markup=build_about_me_main_markup()
-                    )
-                    await callback.answer()
-                    return
-                
-                # Get first section with questions
-                first_question = None
-                section_id = None
-                for section in sections:
-                    section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
-                    questions = section_detail.get("section", {}).get("questions", [])
-                    if questions:
-                        first_question = questions[0]
-                        section_id = section.get("id")
-                        break
-                
-                if not first_question:
-                    await callback.message.edit_text(
-                        "👣 Пройти мини-опрос\n\n"
-                        "Вопросы пока не доступны.",
-                        reply_markup=build_about_me_main_markup()
-                    )
-                    await callback.answer()
-                    return
-                
-                # Store survey state
-                await state.update_data(
-                    survey_section_id=section_id,
-                    survey_question_id=first_question.get("id"),
-                    survey_question_index=0,
-                    survey_mode=True
-                )
-                await state.set_state(ProfileStates.answering_question)
-                
-                question_text = first_question.get("question_text", "")
-                is_optional = first_question.get("is_optional", False)
-                
+            if not token:
+                await callback.answer("Ошибка авторизации")
+                return
+            
+            # Show loading message
+            await callback.answer("Загружаю вопросы...")
+            
+            # Get first section with questions - optimize by getting only first section
+            sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+            sections = sections_data.get("sections", []) if sections_data else []
+            
+            if not sections:
                 await callback.message.edit_text(
-                    f"👣 Пройти мини-опрос\n\n"
-                    f"❓ {question_text}",
-                    reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
+                    "👣 Пройти мини-опрос\n\n"
+                    "Вопросы пока не доступны.",
+                    reply_markup=build_about_me_main_markup()
                 )
+                await callback.answer()
+                return
+            
+            # Get first section only (optimize - don't loop through all)
+            first_section = sections[0] if sections else None
+            if not first_section:
+                await callback.message.edit_text(
+                    "👣 Пройти мини-опрос\n\n"
+                    "Вопросы пока не доступны.",
+                    reply_markup=build_about_me_main_markup()
+                )
+                await callback.answer()
+                return
+            
+            # Get section detail for first section only
+            section_detail = await BACKEND_CLIENT.get_section_detail(token, first_section.get("id"))
+            questions = section_detail.get("section", {}).get("questions", []) if section_detail else []
+            
+            if not questions:
+                await callback.message.edit_text(
+                    "👣 Пройти мини-опрос\n\n"
+                    "Вопросы пока не доступны.",
+                    reply_markup=build_about_me_main_markup()
+                )
+                await callback.answer()
+                return
+            
+            first_question = questions[0]
+            section_id = first_section.get("id")
+            
+            # Store survey state
+            await state.update_data(
+                survey_section_id=section_id,
+                survey_question_id=first_question.get("id"),
+                survey_question_index=0,
+                survey_mode=True
+            )
+            await state.set_state(ProfileStates.answering_question)
+            
+            question_text = first_question.get("question_text", "")
+            is_optional = first_question.get("is_optional", False)
+            
+            await callback.message.edit_text(
+                f"👣 Пройти мини-опрос\n\n"
+                f"❓ {question_text}",
+                reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
+            )
         except Exception as e:
             logger.exception("Error starting survey: %s", e)
-            await callback.answer("Ошибка загрузки опроса")
+            await callback.message.edit_text(
+                "❌ Ошибка загрузки опроса. Попробуй позже.",
+                reply_markup=build_about_me_main_markup()
+            )
         await callback.answer()
         return
     
@@ -2670,46 +2686,46 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                 token, section_id, question_id, answer_text
             )
             
-            # Get next question from all sections
-            sections_data = await BACKEND_CLIENT.get_profile_sections(token)
-            sections = sections_data.get("sections", []) if sections_data else []
+            # Check if there's a next question in the response
+            next_question_data = result.get("next_question")
             
-            next_question = None
-            next_section_id = None
-            
-            # Find next unanswered question across all sections
-            for section in sections:
-                section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
-                questions = section_detail.get("section", {}).get("questions", [])
+            if next_question_data:
+                # Show next question (can be basic or generated follow-up)
+                question_text = next_question_data.get("text", "")
+                is_optional = next_question_data.get("is_optional", True)
+                is_generated = next_question_data.get("is_generated", False)
+                next_question_id = next_question_data.get("id")
                 
-                for q in questions:
-                    # Check if question is answered (simplified - in real implementation check answer status)
-                    next_question = q
-                    next_section_id = section.get("id")
-                    break
-                
-                if next_question:
-                    break
-            
-            if next_question:
-                # Show next question
-                question_text = next_question.get("question_text", "")
-                is_optional = next_question.get("is_optional", False)
-                
-                await state.update_data(
-                    survey_section_id=next_section_id,
-                    survey_question_id=next_question.get("id")
-                )
+                # For generated questions, we still need section_id
+                # For regular questions, use the question's section
+                if is_generated:
+                    # Generated question - keep same section
+                    next_section_id = section_id
+                    # Store that it's a generated question
+                    await state.update_data(
+                        survey_section_id=next_section_id,
+                        survey_question_id=None,  # No DB ID for generated questions
+                        survey_is_generated=True,
+                        survey_generated_text=question_text
+                    )
+                else:
+                    # Regular question from DB
+                    next_section_id = section_id  # Same section for now
+                    await state.update_data(
+                        survey_section_id=next_section_id,
+                        survey_question_id=next_question_id,
+                        survey_is_generated=False
+                    )
                 
                 await send_long_message(
                     message,
                     f"✅ Ответ сохранён!\n\n"
                     f"👣 Пройти мини-опрос\n\n"
                     f"❓ {question_text}",
-                    reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                    reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
                 )
             else:
-                # All questions answered
+                # All questions answered (including follow-ups)
                 await state.clear()
                 await message.answer(
                     "✅ Мини-опрос завершён!\n\n"
@@ -2720,15 +2736,22 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
             # Handle regular profile mode
             section_id = state_data.get("section_id")
             question_id = state_data.get("current_question_id")
+            is_generated = state_data.get("is_generated_question", False)
             questions = state_data.get("questions", [])
             question_index = state_data.get("question_index", 0)
             
-            if not section_id or not question_id:
+            if not section_id:
+                await message.answer("Ошибка: не найден раздел. Начни заново с /profile")
+                await state.clear()
+                return
+            
+            # For generated questions, question_id might be None
+            if not is_generated and not question_id:
                 await message.answer("Ошибка: не найден вопрос. Начни заново с /profile")
                 await state.clear()
                 return
             
-            # Submit answer
+            # Submit answer (question_id can be None for generated questions)
             result = await BACKEND_CLIENT.submit_profile_answer(
                 token, section_id, question_id, answer_text
             )
@@ -2737,12 +2760,25 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
             next_question = result.get("next_question")
             
             if next_question:
-                # Show next question
+                # Show next question (can be basic or generated follow-up)
                 next_question_text = next_question.get("text", "")
-                await state.update_data(
-                    current_question_id=next_question.get("id"),
-                    question_index=question_index + 1
-                )
+                is_generated = next_question.get("is_generated", False)
+                next_question_id = next_question.get("id")
+                
+                if is_generated:
+                    # Generated follow-up question
+                    await state.update_data(
+                        current_question_id=None,  # No DB ID for generated questions
+                        question_index=question_index + 1,
+                        is_generated_question=True
+                    )
+                else:
+                    # Regular question from DB
+                    await state.update_data(
+                        current_question_id=next_question_id,
+                        question_index=question_index + 1,
+                        is_generated_question=False
+                    )
                 
                 markup = build_profile_actions_markup(section_id)
                 if next_question.get("is_optional"):
@@ -2755,7 +2791,7 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                     reply_markup=markup
                 )
             else:
-                # All questions answered
+                # All questions answered (including follow-ups)
                 await message.answer(
                     "✅ Все вопросы в этом разделе отвечены!",
                     reply_markup=build_profile_actions_markup(section_id)

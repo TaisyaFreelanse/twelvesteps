@@ -252,7 +252,7 @@ class ProfileSectionDetailResponse(BaseModel):
 
 
 class ProfileAnswerRequest(BaseModel):
-    question_id: int
+    question_id: Optional[int] = None  # None for generated follow-up questions
     answer_text: str = Field(..., min_length=1)
 
 
