@@ -505,7 +505,7 @@ def build_free_story_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить запись", callback_data="about_add_free")],
         [InlineKeyboardButton(text="🗃️ История", callback_data="about_history_free")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="about_back")]
     ])
 
 
@@ -518,7 +518,7 @@ def build_mini_survey_markup(question_id: Optional[int] = None, can_skip: bool =
         InlineKeyboardButton(text="⏸ Пауза", callback_data="about_survey_pause"),
         InlineKeyboardButton(text="✔️ Сохранить и продолжить", callback_data="about_survey_save")
     ])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="about_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -529,7 +529,7 @@ def build_about_section_actions_markup(section_id: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕ Добавить запись", callback_data=f"about_add_{section_id}"),
             InlineKeyboardButton(text="🗃️ История", callback_data=f"about_history_{section_id}")
         ],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_about")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="about_back")]
     ])
 
 
