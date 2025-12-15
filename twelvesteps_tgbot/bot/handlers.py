@@ -2869,13 +2869,79 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                     reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
                 )
             else:
-                # All questions answered (including follow-ups)
-                await state.clear()
-                await message.answer(
-                    "✅ Мини-опрос завершён!\n\n"
-                    "Спасибо за ответы.",
-                    reply_markup=build_about_me_main_markup()
-                )
+                # All questions in current section answered - move to next section
+                # Get all sections to find next section with unanswered questions
+                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+                sections = sections_data.get("sections", []) if sections_data else []
+                
+                # Find next section with unanswered questions
+                next_section = None
+                current_section_found = False
+                
+                for section in sections:
+                    if current_section_found:
+                        # Check if this section has unanswered questions
+                        section_id_to_check = section.get("id")
+                        if section_id_to_check:
+                            section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id_to_check)
+                            if section_detail:
+                                section_info = section_detail.get("section", {})
+                                questions = section_info.get("questions", [])
+                                
+                                # Check if there are unanswered questions
+                                if questions:
+                                    # Get user's answers for this section to check if all answered
+                                    # For now, if section has questions, try it
+                                    next_section = section
+                                    break
+                    
+                    if section.get("id") == section_id:
+                        current_section_found = True
+                
+                if next_section:
+                    # Move to next section
+                    next_section_id = next_section.get("id")
+                    section_detail = await BACKEND_CLIENT.get_section_detail(token, next_section_id)
+                    section_info = section_detail.get("section", {}) if section_detail else {}
+                    questions = section_info.get("questions", [])
+                    
+                    if questions:
+                        first_question = questions[0]
+                        await state.update_data(
+                            survey_section_id=next_section_id,
+                            survey_question_id=first_question.get("id"),
+                            survey_question_index=0,
+                            survey_mode=True,
+                            survey_is_generated=False
+                        )
+                        
+                        question_text = first_question.get("question_text", "")
+                        is_optional = first_question.get("is_optional", False)
+                        
+                        await send_long_message(
+                            message,
+                            f"✅ Раздел завершён!\n\n"
+                            f"👣 Пройти мини-опрос\n\n"
+                            f"📋 {next_section.get('name', 'Следующий раздел')}\n\n"
+                            f"❓ {question_text}",
+                            reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
+                        )
+                    else:
+                        # No questions in next section, continue searching
+                        await state.clear()
+                        await message.answer(
+                            "✅ Мини-опрос завершён!\n\n"
+                            "Спасибо за ответы.",
+                            reply_markup=build_about_me_main_markup()
+                        )
+                else:
+                    # All sections completed
+                    await state.clear()
+                    await message.answer(
+                        "✅ Мини-опрос завершён!\n\n"
+                        "Спасибо за ответы.",
+                        reply_markup=build_about_me_main_markup()
+                    )
         else:
             # Handle regular profile mode
             section_id = state_data.get("section_id")

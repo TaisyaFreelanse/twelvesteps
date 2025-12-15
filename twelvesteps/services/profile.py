@@ -45,6 +45,9 @@ class ProfileService:
         """
         answer = await self.repo.save_answer(user_id, question_id, answer_text)
         
+        # Ensure the answer is flushed so it's visible in subsequent queries
+        await self.session.flush()
+        
         # Get section_id from question
         from sqlalchemy import select
         query = select(ProfileQuestion).where(ProfileQuestion.id == question_id)
@@ -53,6 +56,8 @@ class ProfileService:
         
         if question:
             # Get next question based on answer
+            # Refresh session to ensure we see the newly saved answer
+            await self.session.refresh(answer)
             next_question = await self.get_next_question_for_section(
                 user_id, question.section_id, answer_text
             )
@@ -173,11 +178,22 @@ class ProfileService:
             return None
         
         # Get user's answers for this section
+        # Note: get_user_answers_for_section returns all versions, but we only need unique question_ids
         user_answers = await self.repo.get_user_answers_for_section(user_id, section_id)
+        # Get unique question IDs that have been answered (any version counts as answered)
         answered_question_ids = {ans.question_id for ans in user_answers}
         
         # Find unanswered questions
         unanswered = [q for q in questions if q.id not in answered_question_ids]
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[ProfileService.get_next_question_for_section] Section {section_id}: "
+                   f"Total questions: {len(questions)}, "
+                   f"Answered: {len(answered_question_ids)}, "
+                   f"Unanswered: {len(unanswered)}, "
+                   f"Has last_answer: {last_answer is not None}")
         
         # If all basic questions are answered, check if we should generate follow-up question
         if not unanswered and last_answer:
@@ -210,18 +226,16 @@ class ProfileService:
         
         # If no last_answer provided, return first unanswered question
         if not last_answer:
+            return unanswered[0] if unanswered else None
+        
+        # For mini-survey mode, just return next unanswered question in order
+        # Don't use LLM suggestion to avoid delays and potential failures
+        # Simply return the first unanswered question
+        if unanswered:
             return unanswered[0]
         
-        # Use LLM to suggest next question based on answer
-        try:
-            next_question = await self._suggest_next_question(
-                section, unanswered, last_answer
-            )
-            return next_question
-        except Exception as e:
-            # Fallback to first unanswered question if LLM fails
-            print(f"[ProfileService] Error suggesting next question: {e}")
-            return unanswered[0]
+        # This should not happen if we have unanswered questions
+        return None
 
     async def _suggest_next_question(
         self,

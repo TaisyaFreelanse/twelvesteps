@@ -811,6 +811,14 @@ async def submit_profile_answer(
             answer_data.question_id,
             answer_data.answer_text
         )
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[submit_profile_answer] User {current_user.user.id}, question_id={answer_data.question_id}, "
+                   f"next_question={'found' if next_question else 'None'}, "
+                   f"next_question_id={next_question.id if next_question else None}, "
+                   f"next_question_text={next_question.question_text[:50] if next_question else None}...")
     else:
         # Generated question - save as free text in section
         # Append to existing free text instead of overwriting
