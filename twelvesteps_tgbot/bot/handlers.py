@@ -1577,8 +1577,9 @@ async def handle_step_settings_callback(callback: CallbackQuery, state: FSMConte
         await callback.answer()
         return
     
-    if data.startswith("step_settings_select_"):
+    if data.startswith("step_settings_select_") and data != "step_settings_select_question":
         # User selected a step - switch to it
+        # Exclude "step_settings_select_question" which is handled separately
         try:
             step_id = int(data.split("_")[-1])
             token = await get_or_fetch_token(telegram_id, username, first_name)
@@ -1592,7 +1593,7 @@ async def handle_step_settings_callback(callback: CallbackQuery, state: FSMConte
                     )
                 else:
                     await callback.answer("Ошибка переключения шага")
-        except Exception as e:
+        except (ValueError, Exception) as e:
             logger.exception("Error switching step: %s", e)
             await callback.answer("Ошибка переключения шага")
         await callback.answer()
