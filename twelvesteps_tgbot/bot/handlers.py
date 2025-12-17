@@ -6,6 +6,7 @@ from functools import partial
 import json
 import logging
 import datetime
+import asyncio
 
 from aiogram import Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest
@@ -318,20 +319,7 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
                     if template_progress:
                         full_text = f"{progress_indicator}\n\n⏸ Есть сохранённый прогресс по шаблону\n📊 {template_progress.get('progress_summary', '')}\n\n❔{response_text}"
                     
-                    # Save session context for STEPS
-                    context_data = {
-                        "step_number": step_number,
-                        "step_title": step_info.get("step_title", ""),
-                        "step_description": step_info.get("step_description", ""),
-                        "current_question": response_text[:200],
-                        "total_steps": step_info.get("total_steps", 12),
-                        "answered_questions": step_info.get("answered_questions", 0),
-                        "total_questions": step_info.get("total_questions", 0)
-                    }
-                    try:
-                        await BACKEND_CLIENT.save_session_context(token, "STEPS", context_data)
-                    except Exception as e:
-                        logger.warning(f"Failed to save session context: {e}")
+                    # Note: Session context saving removed - method doesn't exist in BackendClient
                     
                     # Store step description in state for toggle
                     await state.update_data(step_description=step_info.get("step_description", ""))
@@ -1110,17 +1098,40 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await state.set_state(SosStates.chatting)
             await state.update_data(help_type=help_type, conversation_history=[])
             
-            # Get initial SOS response
-            sos_response = await BACKEND_CLIENT.sos_chat(
-                access_token=token,
-                help_type=help_type
-            )
+            # Answer callback immediately to prevent expiration during long backend request
+            await safe_answer_callback(callback, "Загружаю помощь...")
             
-            reply_text = sos_response.get("reply", "")
-            
-            # If reply is empty, show error message
-            if not reply_text or reply_text.strip() == "":
-                reply_text = "Извини, не удалось получить ответ. Попробуй ещё раз или опиши проблему своими словами."
+            # Get initial SOS response with timeout handling
+            try:
+                sos_response = await asyncio.wait_for(
+                    BACKEND_CLIENT.sos_chat(
+                        access_token=token,
+                        help_type=help_type
+                    ),
+                    timeout=15.0  # 15 second timeout
+                )
+                
+                reply_text = sos_response.get("reply", "") if sos_response else ""
+                
+                # If reply is empty, show error message
+                if not reply_text or reply_text.strip() == "":
+                    reply_text = "Извини, не удалось получить ответ. Попробуй ещё раз или опиши проблему своими словами."
+            except asyncio.TimeoutError:
+                logger.warning(f"SOS chat timeout for user {telegram_id}, help_type={help_type}")
+                reply_text = (
+                    "⏱️ Запрос занимает больше времени, чем обычно.\n\n"
+                    "Попробуй:\n"
+                    "• Подождать немного и попробовать снова\n"
+                    "• Опиши проблему своими словами в разделе «Своё описание»"
+                )
+            except Exception as e:
+                logger.exception(f"Error getting SOS response for user {telegram_id}: {e}")
+                reply_text = (
+                    "❌ Произошла ошибка при получении помощи.\n\n"
+                    "Попробуй:\n"
+                    "• Подождать немного и попробовать снова\n"
+                    "• Опиши проблему своими словами в разделе «Своё описание»"
+                )
             
             # For "question" type, clean up the response - remove extra formatting
             if help_type == "question":
@@ -1219,15 +1230,31 @@ async def handle_sos_chat_message(message: Message, state: FSMContext) -> None:
         # Add user message to history
         conversation_history.append({"role": "user", "content": text})
         
-        # Get SOS response
-        sos_response = await BACKEND_CLIENT.sos_chat(
-            access_token=token,
-            help_type=help_type,
-            message=text,
-            conversation_history=conversation_history
-        )
-        
-        reply_text = sos_response.get("reply", "Готов помочь!")
+        # Get SOS response with timeout handling
+        try:
+            sos_response = await asyncio.wait_for(
+                BACKEND_CLIENT.sos_chat(
+                    access_token=token,
+                    help_type=help_type,
+                    message=text,
+                    conversation_history=conversation_history
+                ),
+                timeout=15.0  # 15 second timeout
+            )
+            
+            reply_text = sos_response.get("reply", "Готов помочь!") if sos_response else "Готов помочь!"
+        except asyncio.TimeoutError:
+            logger.warning(f"SOS chat timeout for user {telegram_id}, help_type={help_type}")
+            reply_text = (
+                "⏱️ Запрос занимает больше времени, чем обычно.\n\n"
+                "Попробуй подождать немного или опиши проблему по-другому."
+            )
+        except Exception as e:
+            logger.exception(f"Error getting SOS response for user {telegram_id}: {e}")
+            reply_text = (
+                "❌ Произошла ошибка при получении помощи.\n\n"
+                "Попробуй подождать немного или опиши проблему по-другому."
+            )
         
         # For "support" type (мне тяжело), save user messages to profile
         if help_type == "support":
@@ -1269,13 +1296,30 @@ async def handle_sos_custom_input(message: Message, state: FSMContext) -> None:
         await state.set_state(SosStates.chatting)
         await state.update_data(help_type="custom", conversation_history=[])
         
-        sos_response = await BACKEND_CLIENT.sos_chat(
-            access_token=token,
-            help_type="custom",
-            custom_text=custom_text
-        )
-        
-        reply_text = sos_response.get("reply", "Готов помочь!")
+        # Get SOS response with timeout handling
+        try:
+            sos_response = await asyncio.wait_for(
+                BACKEND_CLIENT.sos_chat(
+                    access_token=token,
+                    help_type="custom",
+                    custom_text=custom_text
+                ),
+                timeout=15.0  # 15 second timeout
+            )
+            
+            reply_text = sos_response.get("reply", "Готов помочь!") if sos_response else "Готов помочь!"
+        except asyncio.TimeoutError:
+            logger.warning(f"SOS chat timeout for user {telegram_id}, help_type=custom")
+            reply_text = (
+                "⏱️ Запрос занимает больше времени, чем обычно.\n\n"
+                "Попробуй подождать немного или опиши проблему по-другому."
+            )
+        except Exception as e:
+            logger.exception(f"Error getting SOS response for user {telegram_id}: {e}")
+            reply_text = (
+                "❌ Произошла ошибка при получении помощи.\n\n"
+                "Попробуй подождать немного или опиши проблему по-другому."
+            )
         
         await send_long_message(
             message,
