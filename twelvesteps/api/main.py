@@ -552,6 +552,19 @@ async def get_draft(
     
     return DraftResponse(success=draft is not None, draft=draft)
 
+@app.get("/steps/current/question-id")
+async def get_current_question_id(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get question_id from active Tail if exists"""
+    service = StepFlowService(current_context.session)
+    question_id = await service.get_active_question_id(current_context.user.id)
+    
+    if question_id is None:
+        raise HTTPException(status_code=404, detail="No active question found")
+    
+    return {"question_id": question_id}
+
 @app.get("/steps/question/{question_id}/previous", response_model=PreviousAnswerResponse)
 async def get_previous_answer(
     question_id: int,

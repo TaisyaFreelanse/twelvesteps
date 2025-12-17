@@ -489,7 +489,7 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
                 full_response = f"✅ Ответ обновлён!\n\n❔{response_text}"
             
             await send_long_message(message, full_response, reply_markup=build_step_actions_markup(show_description=False))
-            await state.update_data(action=None)
+            await state.update_data(action=None, current_question_id=None)
             await state.set_state(StepState.answering)
             
             if is_completed:
@@ -1043,7 +1043,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                                 answered_questions=step_info.get("answered_questions", 0),
                                 total_questions=step_info.get("total_questions", 0)
                             )
-                            full_text = f"{progress_indicator}\n\n{response_text}"
+                            full_text = f"{progress_indicator}\n\n❔{response_text}"
                             await edit_long_message(
                                 callback,
                                 full_text,
@@ -1064,31 +1064,8 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             await safe_answer_callback(callback)
             return
         
-        if data == "sos_cancel":
-            # Cancel SOS - return to main menu
-            await state.clear()
-            await edit_long_message(
-                callback,
-                "❌ Помощь отменена.\n\nВернулся в главное меню.",
-                reply_markup=None
-            )
-            # Send main menu as a new message with ReplyKeyboardMarkup
-            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await safe_answer_callback(callback)
-            return
-        
-        if data == "sos_exit":
-            # Exit SOS chat
-            await state.clear()
-            await edit_long_message(
-                callback,
-                "✅ Вышел из помощи.\n\nВернулся в главное меню.",
-                reply_markup=None
-            )
-            # Send main menu as a new message with ReplyKeyboardMarkup
-            await callback.message.answer("Главное меню:", reply_markup=build_main_menu_markup())
-            await safe_answer_callback(callback)
-            return
+        # Removed sos_cancel and sos_exit - they reset to main menu, but we need to return to step work
+        # Use sos_back instead which returns to step work or main menu appropriately
         
         if data == "sos_help":
             # User clicked "🆘 Нужна помощь" button - show help type selection
@@ -1139,7 +1116,11 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                 help_type=help_type
             )
             
-            reply_text = sos_response.get("reply", "Готов помочь!")
+            reply_text = sos_response.get("reply", "")
+            
+            # If reply is empty, show error message
+            if not reply_text or reply_text.strip() == "":
+                reply_text = "Извини, не удалось получить ответ. Попробуй ещё раз или опиши проблему своими словами."
             
             # For "question" type, clean up the response - remove extra formatting
             if help_type == "question":
@@ -1157,11 +1138,15 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                     if not skip_until_empty:
                         cleaned_lines.append(line)
                 reply_text = "\n".join(cleaned_lines).strip()
+                # If after cleaning reply is empty, provide default message
+                if not reply_text or reply_text.strip() == "":
+                    reply_text = "Попробую объяснить вопрос проще. Напиши, что именно непонятно, и я помогу разобраться."
             
             # For "examples" type, ensure we show examples
-            if help_type == "examples" and "пример" not in reply_text.lower() and "example" not in reply_text.lower():
-                # If no examples in response, add a note
-                reply_text += "\n\n💡 Если нужны конкретные примеры, напиши мне об этом."
+            if help_type == "examples":
+                if "пример" not in reply_text.lower() and "example" not in reply_text.lower():
+                    # If no examples in response, add a note
+                    reply_text += "\n\n💡 Если нужны конкретные примеры, напиши мне об этом."
             
             await edit_long_message(
                 callback,
@@ -1243,6 +1228,14 @@ async def handle_sos_chat_message(message: Message, state: FSMContext) -> None:
         )
         
         reply_text = sos_response.get("reply", "Готов помочь!")
+        
+        # For "support" type (мне тяжело), save user messages to profile
+        if help_type == "support":
+            # Save user's message as free text to profile
+            try:
+                await BACKEND_CLIENT.submit_general_free_text(token, text)
+            except Exception as e:
+                logger.warning(f"Failed to save SOS support message to profile: {e}")
         
         # Add assistant response to history
         conversation_history.append({"role": "assistant", "content": reply_text})
@@ -1513,16 +1506,10 @@ async def handle_main_settings_callback(callback: CallbackQuery, state: FSMConte
                 await callback.answer("Ошибка авторизации")
                 return
             
-            # Get current settings
-            settings = await BACKEND_CLIENT.get_steps_settings(token)
-            active_template_name = settings.get("active_template_name", "Не выбран")
-            reminders_enabled = settings.get("reminders_enabled", False)
-            
+            # Simplified settings - only step and question selection
             settings_text = (
                 "⚙️ Настройки работы по шагу\n\n"
-                f"⚙️ Активный шаблон: {active_template_name}\n"
-                f"⏰ Напоминания: {'✅ Включены' if reminders_enabled else '❌ Выключены'}\n\n"
-                "Выбери настройку для изменения:"
+                "Выбери шаг и вопрос для работы:"
             )
             
             await callback.message.edit_text(
@@ -2734,19 +2721,6 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
             await state.set_state(ProfileStates.creating_custom_section)
             await callback.answer()
             
-        elif data.startswith("profile_save_"):
-            # Save section
-            section_id = int(data.split("_")[-1])
-            summary = await BACKEND_CLIENT.get_section_summary(token, section_id)
-            
-            summary_text = f"✅ Раздел сохранён!\n\n"
-            summary_text += f"Вопросов: {summary.get('questions_count', 0)}\n"
-            summary_text += f"Отвечено: {summary.get('answers_count', 0)}"
-            
-            await edit_long_message(callback, summary_text)
-            await state.clear()
-            await callback.answer("Раздел сохранён")
-            
         elif data == "profile_back":
             # Back to sections list
             sections_data = await BACKEND_CLIENT.get_profile_sections(token)
@@ -3699,12 +3673,41 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             return
         
         if data == "step_save_draft":
-            # Save draft - prompt user to enter text
+            # Save draft - prompt user to enter text or show existing draft
+            # First check if there's an existing draft
+            draft_data = await BACKEND_CLIENT.get_draft(token)
+            existing_draft = draft_data.get("draft", "") if draft_data and draft_data.get("success") else ""
+            
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            current_question_text = step_data.get("message", "") if step_data else ""
+            
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            progress_indicator = format_step_progress_indicator(
+                step_number=step_info.get("step_number", 0),
+                total_steps=step_info.get("total_steps", 12),
+                step_title=step_info.get("step_title"),
+                answered_questions=step_info.get("answered_questions", 0),
+                total_questions=step_info.get("total_questions", 0)
+            ) if step_info else ""
+            
+            draft_text = f"{progress_indicator}\n\n" if progress_indicator else ""
+            draft_text += "💾 Сохранить черновик\n\n"
+            if current_question_text:
+                draft_text += f"❔{current_question_text}\n\n"
+            
+            if existing_draft:
+                draft_text += f"📝 Текущий черновик:\n{existing_draft[:200]}{'...' if len(existing_draft) > 200 else ''}\n\n"
+                draft_text += "Введи новый текст черновика или отправь текущий для сохранения:"
+            else:
+                draft_text += "Введи текст черновика и отправь его:"
+            
             await state.update_data(action="save_draft")
-            await callback.message.edit_text(
-                "💾 Сохранить черновик\n\n"
-                "Введи текст черновика и отправь его:"
-            )
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            draft_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="step_back_from_answer")]
+            ])
+            
+            await callback.message.edit_text(draft_text, reply_markup=draft_markup)
             await callback.answer()
             return
         
@@ -3715,15 +3718,23 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                 await callback.answer("Нет активного вопроса")
                 return
             
-            # Get question ID from active tail
-            questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
-            questions = questions_data.get("questions", []) if questions_data else []
-            current_question_text = step_data.get("message", "")
-            question_id = None
-            for q in questions:
-                if q.get("text") == current_question_text:
-                    question_id = q.get("id")
-                    break
+            # Get question ID from active Tail directly
+            try:
+                question_id_data = await BACKEND_CLIENT.get_current_question_id(token)
+                question_id = question_id_data.get("question_id")
+            except Exception as e:
+                logger.warning(f"Failed to get current question_id: {e}")
+                question_id = None
+            
+            # Fallback: try to get from questions list
+            if not question_id:
+                questions_data = await BACKEND_CLIENT.get_current_step_questions(token)
+                questions = questions_data.get("questions", []) if questions_data else []
+                current_question_text = step_data.get("message", "")
+                for q in questions:
+                    if q.get("text") == current_question_text:
+                        question_id = q.get("id")
+                        break
             
             if question_id:
                 prev_answer_data = await BACKEND_CLIENT.get_previous_answer(token, question_id)
@@ -3741,13 +3752,14 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                     
                     await callback.message.edit_text(
                         f"{progress_indicator}\n\n"
-                        f"❔{current_question_text}\n\n"
+                        f"❔{step_data.get('message', '')}\n\n"
                         f"✏️ Редактировать последний ответ:\n\n"
                         f"Предыдущий ответ:\n{prev_answer}\n\n"
                         f"Введи новый ответ:",
                         reply_markup=build_step_answer_mode_markup()
                     )
-                    await state.update_data(action="edit_answer", previous_answer=prev_answer)
+                    await state.update_data(action="edit_answer", previous_answer=prev_answer, current_question_id=question_id)
+                    await state.set_state(StepState.answer_mode)
                     await callback.answer()
                 else:
                     await callback.answer("Предыдущий ответ не найден")
@@ -3787,10 +3799,32 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
         if data == "step_complete":
             # Complete and move to next - prompt to enter final answer
             await state.update_data(action="complete")
-            await callback.message.edit_text(
-                "✔️ Завершить и перейти\n\n"
-                "Введи финальный ответ и отправь его. После этого ответ будет сохранён и ты перейдёшь к следующему вопросу:"
-            )
+            # Get current question text for context
+            step_data = await get_current_step_question(telegram_id, username, first_name)
+            current_question_text = step_data.get("message", "") if step_data else ""
+            
+            step_info = await BACKEND_CLIENT.get_current_step_info(token)
+            progress_indicator = format_step_progress_indicator(
+                step_number=step_info.get("step_number", 0),
+                total_steps=step_info.get("total_steps", 12),
+                step_title=step_info.get("step_title"),
+                answered_questions=step_info.get("answered_questions", 0),
+                total_questions=step_info.get("total_questions", 0)
+            ) if step_info else ""
+            
+            complete_text = f"{progress_indicator}\n\n" if progress_indicator else ""
+            complete_text += "✔️ Завершить и перейти\n\n"
+            if current_question_text:
+                complete_text += f"❔{current_question_text}\n\n"
+            complete_text += "Введи финальный ответ и отправь его. После этого ответ будет сохранён и ты перейдёшь к следующему вопросу:"
+            
+            # Create markup with back button
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            complete_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="step_back_from_answer")]
+            ])
+            
+            await callback.message.edit_text(complete_text, reply_markup=complete_markup)
             await callback.answer()
             return
         

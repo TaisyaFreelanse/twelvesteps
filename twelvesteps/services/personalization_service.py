@@ -4,7 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update, desc
 from db.models import (
     User, ProfileAnswer, ProfileQuestion, ProfileSection, ProfileSectionData,
-    StepAnswer, Question, Step, Message, SenderRole, Gratitude
+    StepAnswer, Question, Step, Message, SenderRole, Gratitude,
+    Step10DailyAnalysis, Step10AnalysisStatus
 )
 from repositories.UserRepository import UserRepository
 
@@ -46,6 +47,18 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
     ).strip()
     personalized_prompt = re.sub(
         r'=== ОТВЕТЫ ПО ШАГАМ.*?===.*?(?=\n\n===|\Z)',
+        '',
+        personalized_prompt,
+        flags=re.DOTALL
+    ).strip()
+    personalized_prompt = re.sub(
+        r'=== БЛАГОДАРНОСТИ.*?===.*?(?=\n\n===|\Z)',
+        '',
+        personalized_prompt,
+        flags=re.DOTALL
+    ).strip()
+    personalized_prompt = re.sub(
+        r'=== ЕЖЕДНЕВНЫЙ САМОАНАЛИЗ.*?===.*?(?=\n\n===|\Z)',
         '',
         personalized_prompt,
         flags=re.DOTALL
@@ -227,7 +240,41 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
         gratitudes_summary += "Пользователь еще не записывал благодарности.\n\n"
     
     # ============================================================
-    # 4. COLLECT REGULAR CHAT MESSAGES (from everyday conversations)
+    # 4. COLLECT STEP 10 DAILY ANALYSIS (self-analysis)
+    # ============================================================
+    step10_summary = "=== ЕЖЕДНЕВНЫЙ САМОАНАЛИЗ (ШАГ 10) ===\n\n"
+    
+    # Get recent Step 10 analyses (last 10 completed analyses)
+    step10_analyses_stmt = (
+        select(Step10DailyAnalysis)
+        .where(
+            Step10DailyAnalysis.user_id == user_id,
+            Step10DailyAnalysis.status == Step10AnalysisStatus.COMPLETED
+        )
+        .order_by(desc(Step10DailyAnalysis.analysis_date))
+        .limit(10)
+    )
+    step10_analyses_result = await session.execute(step10_analyses_stmt)
+    step10_analyses = step10_analyses_result.scalars().all()
+    
+    if step10_analyses:
+        step10_summary += "Записи ежедневного самоанализа:\n\n"
+        for analysis in step10_analyses:
+            # Format analysis data from answers JSON
+            if analysis.answers:
+                date_str = analysis.analysis_date.strftime("%d.%m.%Y") if analysis.analysis_date else ""
+                step10_summary += f"[{date_str}]\n"
+                for answer_entry in analysis.answers:
+                    q_num = answer_entry.get("question_number", 0)
+                    answer_text = answer_entry.get("answer", "")
+                    if answer_text:
+                        step10_summary += f"Вопрос {q_num}: {answer_text}\n"
+                step10_summary += "\n"
+    else:
+        step10_summary += "Пользователь еще не проходил ежедневный самоанализ.\n\n"
+    
+    # ============================================================
+    # 5. COLLECT REGULAR CHAT MESSAGES (from everyday conversations)
     # ============================================================
     chat_summary = "=== ИНФОРМАЦИЯ ИЗ ОБЫЧНОГО ОБЩЕНИЯ ===\n\n"
     
@@ -258,10 +305,10 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
         chat_summary += "Пользователь еще не общался в обычном режиме.\n\n"
     
     # ============================================================
-    # 5. BUILD COMPLETE PERSONALIZED PROMPT
+    # 6. BUILD COMPLETE PERSONALIZED PROMPT
     # ============================================================
-    # Combine all information: onboarding -> profile -> steps -> gratitudes -> chat
-    complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{gratitudes_summary}\n\n{chat_summary}"
+    # Combine all information: onboarding -> profile -> steps -> gratitudes -> step10 -> chat
+    complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{gratitudes_summary}\n\n{step10_summary}\n\n{chat_summary}"
     
     # Add instruction for bot
     instruction = """=== ИНСТРУКЦИЯ ДЛЯ БОТА ===

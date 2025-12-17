@@ -147,6 +147,20 @@ class StepFlowService:
             return active_tail.payload["draft"]
         return None
     
+    async def get_active_question_id(self, user_id: int) -> Optional[int]:
+        """Get question_id from active Tail if exists"""
+        stmt = select(Tail).where(
+            Tail.user_id == user_id,
+            Tail.tail_type == TailType.STEP_QUESTION,
+            Tail.is_closed == False
+        )
+        result = await self.session.execute(stmt)
+        active_tail = result.scalars().first()
+        
+        if active_tail and active_tail.step_question_id:
+            return active_tail.step_question_id
+        return None
+    
     async def switch_to_question(self, user_id: int, question_id: int) -> Optional[str]:
         """Switch to a specific question, also switching step if needed"""
         # First, get the question to find which step it belongs to

@@ -133,10 +133,7 @@ def build_profile_sections_markup(sections: List[Dict[str, Any]]) -> InlineKeybo
 def build_profile_actions_markup(section_id: int) -> InlineKeyboardMarkup:
     """Build action buttons for a profile section."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✍️ Свободный рассказ", callback_data=f"profile_free_text_{section_id}"),
-            InlineKeyboardButton(text="✅ Сохранить", callback_data=f"profile_save_{section_id}")
-        ],
+        [InlineKeyboardButton(text="✍️ Свободный рассказ", callback_data=f"profile_free_text_{section_id}")],
         [InlineKeyboardButton(text="⏪ Назад", callback_data="profile_back")]
     ])
 
@@ -167,7 +164,6 @@ def build_sos_help_type_markup() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔍 Хочу примеры", callback_data="sos_help_examples")],
         [InlineKeyboardButton(text="🪫 Просто тяжело", callback_data="sos_help_support")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="sos_back")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="sos_cancel")]
     ])
 
 def build_sos_save_draft_markup() -> InlineKeyboardMarkup:
@@ -180,8 +176,7 @@ def build_sos_save_draft_markup() -> InlineKeyboardMarkup:
 def build_sos_exit_markup() -> InlineKeyboardMarkup:
     """Markup for exiting SOS chat."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="sos_back")],
-        [InlineKeyboardButton(text="❌ Выйти из помощи", callback_data="sos_exit")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="sos_back")]
     ])
 
 
@@ -407,12 +402,10 @@ def build_template_conclusion_markup() -> InlineKeyboardMarkup:
 # --- Steps Settings Keyboards ---
 
 def build_steps_settings_markup() -> InlineKeyboardMarkup:
-    """Markup for steps settings main menu."""
+    """Markup for steps settings main menu - simplified: only step and question selection."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🧩 Активный шаблон", callback_data="settings_template")],
-        [InlineKeyboardButton(text="✏️ Редактировать шаблон", callback_data="settings_edit_template")],
-        [InlineKeyboardButton(text="🔄 Сброс на авторский", callback_data="settings_reset_template")],
-        [InlineKeyboardButton(text="⏰ Напоминания", callback_data="settings_reminders")],
+        [InlineKeyboardButton(text="🪜 Выбрать шаг вручную", callback_data="step_settings_select_step")],
+        [InlineKeyboardButton(text="🗂 Выбрать вопрос вручную", callback_data="step_settings_select_question")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")]
     ])
 
@@ -546,19 +539,26 @@ def build_progress_step_markup(step_id: int, step_number: int, step_title: str) 
 
 
 def build_progress_main_markup(steps: list[dict]) -> InlineKeyboardMarkup:
-    """Main progress menu - shows steps with progress and 'View answers' button."""
+    """Main progress menu - shows steps as numbers only (like feelings)."""
     buttons = []
-    for step in steps:
-        step_id = step.get("id")
-        step_number = step.get("number", step_id)
-        step_title = step.get("title", "")[:20]
-        answered = step.get("answered_questions", 0)
-        total = step.get("total_questions", 0)
-        
-        buttons.append([InlineKeyboardButton(
-            text=f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})",
-            callback_data=f"progress_step_{step_id}"
-        )])
+    # Create buttons in rows of 3 (like feelings)
+    for i in range(0, len(steps), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(steps):
+                step = steps[i + j]
+                step_id = step.get('id')
+                step_number = step.get('number', step_id)
+                
+                if step_id is None or step_number is None:
+                    continue
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{step_number}",
+                    callback_data=f"progress_step_{step_id}"
+                ))
+        if row:
+            buttons.append(row)
     
     buttons.append([InlineKeyboardButton(text="📄 Посмотреть ответы", callback_data="progress_view_answers")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="steps_back")])
