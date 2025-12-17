@@ -576,6 +576,18 @@ async def get_previous_answer(
     
     return PreviousAnswerResponse(question_id=question_id, answer_text=answer_text)
 
+@app.get("/steps/question/{question_id}/examples")
+async def get_example_answers(
+    question_id: int,
+    current_context: CurrentUserContext = Depends(get_current_user),
+    limit: int = 5
+):
+    """Get example answers for a question from other users (anonymized)"""
+    service = StepFlowService(current_context.session)
+    examples = await service.get_example_answers(question_id, current_context.user.id, limit)
+    
+    return {"examples": examples, "count": len(examples)}
+
 @app.post("/steps/switch-question", response_model=StepResponse)
 async def switch_to_question(
     switch_data: SwitchQuestionRequest,

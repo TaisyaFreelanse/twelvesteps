@@ -159,6 +159,10 @@ class BackendClient:
     async def get_previous_answer(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Get previous answer for a question"""
         return await self._request("GET", f"/steps/question/{question_id}/previous", token=access_token)
+    
+    async def get_example_answers(self, access_token: str, question_id: int, limit: int = 5) -> Dict[str, Any]:
+        """Get example answers for a question from other users"""
+        return await self._request("GET", f"/steps/question/{question_id}/examples?limit={limit}", token=access_token)
 
     async def switch_to_question(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Switch to a specific question"""

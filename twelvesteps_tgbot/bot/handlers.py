@@ -1094,6 +1094,59 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             }
             help_type_name = help_type_map.get(help_type, help_type)
             
+            # Special handling for "examples" - get examples from database instead of AI
+            if help_type == "examples":
+                # Answer callback immediately
+                await safe_answer_callback(callback, "Загружаю примеры...")
+                
+                # Get current question_id
+                try:
+                    question_id_data = await BACKEND_CLIENT.get_current_question_id(token)
+                    question_id = question_id_data.get("question_id")
+                except Exception as e:
+                    logger.warning(f"Failed to get current question_id for examples: {e}")
+                    question_id = None
+                
+                if question_id:
+                    # Get example answers from database
+                    try:
+                        examples_data = await BACKEND_CLIENT.get_example_answers(token, question_id, limit=5)
+                        examples = examples_data.get("examples", []) if examples_data else []
+                        
+                        if examples:
+                            # Format examples as a list
+                            reply_text = "📋 Примеры ответов на этот вопрос:\n\n"
+                            for i, example in enumerate(examples, 1):
+                                example_text = example.get("text", example.get("preview", ""))
+                                reply_text += f"{i}. {example_text}\n\n"
+                            reply_text += "💡 Используй эти примеры как ориентир, но пиши своими словами."
+                        else:
+                            reply_text = (
+                                "📋 Примеры ответов\n\n"
+                                "Пока нет примеров ответов других пользователей на этот вопрос.\n\n"
+                                "💡 Попробуй ответить своими словами, опираясь на свой опыт."
+                            )
+                    except Exception as e:
+                        logger.exception(f"Error getting examples for user {telegram_id}: {e}")
+                        reply_text = (
+                            "📋 Примеры ответов\n\n"
+                            "❌ Не удалось загрузить примеры. Попробуй позже."
+                        )
+                else:
+                    reply_text = (
+                        "📋 Примеры ответов\n\n"
+                        "❌ Не удалось определить текущий вопрос. Вернись к работе по шагу."
+                    )
+                
+                await edit_long_message(
+                    callback,
+                    f"🆘 Помощь: {help_type_name}\n\n{reply_text}",
+                    reply_markup=build_sos_exit_markup()
+                )
+                await safe_answer_callback(callback)
+                return
+            
+            # For other help types, use AI chat
             # Start SOS chat with selected help type
             await state.set_state(SosStates.chatting)
             await state.update_data(help_type=help_type, conversation_history=[])
@@ -1152,12 +1205,6 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                 # If after cleaning reply is empty, provide default message
                 if not reply_text or reply_text.strip() == "":
                     reply_text = "Попробую объяснить вопрос проще. Напиши, что именно непонятно, и я помогу разобраться."
-            
-            # For "examples" type, ensure we show examples
-            if help_type == "examples":
-                if "пример" not in reply_text.lower() and "example" not in reply_text.lower():
-                    # If no examples in response, add a note
-                    reply_text += "\n\n💡 Если нужны конкретные примеры, напиши мне об этом."
             
             await edit_long_message(
                 callback,

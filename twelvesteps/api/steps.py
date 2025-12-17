@@ -147,6 +147,39 @@ class StepFlowService:
             return active_tail.payload["draft"]
         return None
     
+    async def get_example_answers(self, question_id: int, user_id: int, limit: int = 5) -> list[dict]:
+        """Get example answers for a question from other users (anonymized)"""
+        from sqlalchemy import func
+        
+        # Get random answers from other users for this question
+        # Exclude current user's answers
+        stmt = (
+            select(StepAnswer)
+            .where(
+                StepAnswer.question_id == question_id,
+                StepAnswer.user_id != user_id
+            )
+            .order_by(func.random())
+            .limit(limit)
+        )
+        
+        result = await self.session.execute(stmt)
+        answers = result.scalars().all()
+        
+        # Return anonymized examples (just the text, no user info)
+        examples = []
+        for answer in answers:
+            # Truncate long answers to first 200 characters for preview
+            answer_text = answer.answer_text
+            if len(answer_text) > 200:
+                answer_text = answer_text[:200] + "..."
+            examples.append({
+                "text": answer_text,
+                "preview": answer_text[:100] + "..." if len(answer_text) > 100 else answer_text
+            })
+        
+        return examples
+    
     async def get_active_question_id(self, user_id: int) -> Optional[int]:
         """Get question_id from active Tail if exists"""
         stmt = select(Tail).where(
