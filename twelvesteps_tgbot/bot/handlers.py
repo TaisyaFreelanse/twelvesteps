@@ -3652,14 +3652,40 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                         f"✏️ Редактировать последний ответ:\n\n"
                         f"Предыдущий ответ:\n{prev_answer}\n\n"
                         f"Введи новый ответ:",
-                        reply_markup=build_step_answer_mode_markup()
+                        reply_markup=build_step_answer_mode_markup(),
+                        parse_mode=None  # Disable parse mode to avoid entity parsing errors with user text
                     )
                 except TelegramBadRequest as e:
-                    # Handle "message is not modified" error - this is normal when content is the same
+                    # Handle "message is not modified" and entity parsing errors
                     error_message = str(e).lower()
                     if "message is not modified" in error_message:
                         logger.debug(f"Message not modified (content unchanged) for edit_answer: {e}")
                         # Message is already showing the correct content, nothing to do
+                    elif "can't parse entities" in error_message or "unsupported start tag" in error_message:
+                        logger.warning(f"Entity parsing error for edit_answer: {e}, trying without parse_mode")
+                        # Try again without parse_mode (should already be None, but try as fallback)
+                        try:
+                            await callback.message.edit_text(
+                                f"{progress_indicator}\n\n"
+                                f"❔{question_text}\n\n"
+                                f"✏️ Редактировать последний ответ:\n\n"
+                                f"Предыдущий ответ:\n{prev_answer}\n\n"
+                                f"Введи новый ответ:",
+                                reply_markup=build_step_answer_mode_markup(),
+                                parse_mode=None
+                            )
+                        except Exception as e2:
+                            logger.error(f"Failed to edit message even without parse_mode: {e2}")
+                            # Fallback: send new message
+                            await callback.message.answer(
+                                f"{progress_indicator}\n\n"
+                                f"❔{question_text}\n\n"
+                                f"✏️ Редактировать последний ответ:\n\n"
+                                f"Предыдущий ответ:\n{prev_answer}\n\n"
+                                f"Введи новый ответ:",
+                                reply_markup=build_step_answer_mode_markup(),
+                                parse_mode=None
+                            )
                     else:
                         logger.warning(f"TelegramBadRequest when editing message for edit_answer: {e}")
                         # Re-raise if it's a different error
