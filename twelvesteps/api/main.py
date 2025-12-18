@@ -565,6 +565,19 @@ async def get_current_question_id(
     
     return {"question_id": question_id}
 
+@app.get("/steps/last-answered/question-id")
+async def get_last_answered_question_id(
+    current_context: CurrentUserContext = Depends(get_current_user)
+):
+    """Get question_id from the last answered question (last closed Tail)"""
+    service = StepFlowService(current_context.session)
+    question_id = await service.get_last_answered_question_id(current_context.user.id)
+    
+    if question_id is None:
+        raise HTTPException(status_code=404, detail="No answered question found")
+    
+    return {"question_id": question_id}
+
 @app.get("/steps/question/{question_id}/previous", response_model=PreviousAnswerResponse)
 async def get_previous_answer(
     question_id: int,

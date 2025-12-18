@@ -156,6 +156,10 @@ class BackendClient:
         """Get question_id from active Tail"""
         return await self._request("GET", "/steps/current/question-id", token=access_token)
     
+    async def get_last_answered_question_id(self, access_token: str) -> Dict[str, Any]:
+        """Get question_id from the last answered question"""
+        return await self._request("GET", "/steps/last-answered/question-id", token=access_token)
+    
     async def get_previous_answer(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Get previous answer for a question"""
         return await self._request("GET", f"/steps/question/{question_id}/previous", token=access_token)

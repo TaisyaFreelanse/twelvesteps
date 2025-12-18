@@ -365,10 +365,13 @@ def build_step_answer_mode_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="💾 Сохранить черновик", callback_data="step_save_draft"),
-            InlineKeyboardButton(text="✏️ Редактировать последний ответ", callback_data="step_edit_last")
+            InlineKeyboardButton(text="📝 Просмотреть черновик", callback_data="step_view_draft")
         ],
         [
-            InlineKeyboardButton(text="🔄 Сбросить", callback_data="step_reset_draft"),
+            InlineKeyboardButton(text="✏️ Редактировать последний ответ", callback_data="step_edit_last"),
+            InlineKeyboardButton(text="🔄 Сбросить", callback_data="step_reset_draft")
+        ],
+        [
             InlineKeyboardButton(text="✔️ Завершить и перейти", callback_data="step_complete")
         ],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="step_back_from_answer")]
@@ -468,11 +471,11 @@ def build_language_settings_markup(current_lang: str = "ru") -> InlineKeyboardMa
 
 
 def build_step_settings_markup() -> InlineKeyboardMarkup:
-    """Step-specific settings menu."""
+    """Step-specific settings menu - simplified: only step and question selection."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🪜 Выбрать шаг вручную", callback_data="step_settings_select_step")],
         [InlineKeyboardButton(text="🗂 Выбрать вопрос вручную", callback_data="step_settings_select_question")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_back")]
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="settings_back")]
     ])
 
 
@@ -508,8 +511,7 @@ def build_mini_survey_markup(question_id: Optional[int] = None, can_skip: bool =
     if can_skip:
         buttons.append([InlineKeyboardButton(text="🔁 Пропустить", callback_data="about_survey_skip")])
     buttons.append([
-        InlineKeyboardButton(text="⏸ Пауза", callback_data="about_survey_pause"),
-        InlineKeyboardButton(text="✔️ Сохранить и продолжить", callback_data="about_survey_save")
+        InlineKeyboardButton(text="⏸ Пауза", callback_data="about_survey_pause")
     ])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="about_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

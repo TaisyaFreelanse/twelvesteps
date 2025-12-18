@@ -194,6 +194,25 @@ class StepFlowService:
             return active_tail.step_question_id
         return None
     
+    async def get_last_answered_question_id(self, user_id: int) -> Optional[int]:
+        """Get question_id from the last answered question (last closed Tail)"""
+        stmt = (
+            select(Tail)
+            .where(
+                Tail.user_id == user_id,
+                Tail.tail_type == TailType.STEP_QUESTION,
+                Tail.is_closed == True
+            )
+            .order_by(desc(Tail.closed_at))
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        last_tail = result.scalars().first()
+        
+        if last_tail and last_tail.step_question_id:
+            return last_tail.step_question_id
+        return None
+    
     async def switch_to_question(self, user_id: int, question_id: int) -> Optional[str]:
         """Switch to a specific question, also switching step if needed"""
         # First, get the question to find which step it belongs to
