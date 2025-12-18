@@ -114,6 +114,8 @@ async def edit_long_message(
         max_length: Maximum length per chunk
     """
     import logging
+    from aiogram.exceptions import TelegramBadRequest
+    
     logger = logging.getLogger(__name__)
     
     try:
@@ -124,6 +126,16 @@ async def edit_long_message(
             try:
                 await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
                 logger.info(f"Successfully edited message for callback {callback.data}")
+            except TelegramBadRequest as e:
+                # Handle "message is not modified" error - this is normal when content is the same
+                error_message = str(e).lower()
+                if "message is not modified" in error_message:
+                    logger.debug(f"Message not modified (content unchanged) for callback {callback.data}: {e}")
+                    # Message is already showing the correct content, nothing to do
+                else:
+                    logger.error(f"TelegramBadRequest when editing message: {e}, trying to send new message instead")
+                    # If edit fails, try to send new message
+                    await callback.message.answer(chunks[0], reply_markup=reply_markup)
             except Exception as e:
                 logger.error(f"Failed to edit message: {e}, trying to send new message instead")
                 # If edit fails, try to send new message
@@ -133,6 +145,16 @@ async def edit_long_message(
             try:
                 await callback.message.edit_text(chunks[0], reply_markup=reply_markup)
                 logger.info(f"Successfully edited first chunk for callback {callback.data}")
+            except TelegramBadRequest as e:
+                # Handle "message is not modified" error - this is normal when content is the same
+                error_message = str(e).lower()
+                if "message is not modified" in error_message:
+                    logger.debug(f"Message not modified (content unchanged) for callback {callback.data}: {e}")
+                    # Message is already showing the correct content, nothing to do
+                else:
+                    logger.error(f"TelegramBadRequest when editing message: {e}, sending all chunks as new messages")
+                    # If edit fails, send all as new messages
+                    await callback.message.answer(chunks[0], reply_markup=reply_markup)
             except Exception as e:
                 logger.error(f"Failed to edit message: {e}, sending all chunks as new messages")
                 # If edit fails, send all as new messages

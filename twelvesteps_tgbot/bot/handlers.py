@@ -3645,14 +3645,26 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                     total_questions=step_info.get("total_questions", 0)
                 )
                 
-                await callback.message.edit_text(
-                    f"{progress_indicator}\n\n"
-                    f"❔{question_text}\n\n"
-                    f"✏️ Редактировать последний ответ:\n\n"
-                    f"Предыдущий ответ:\n{prev_answer}\n\n"
-                    f"Введи новый ответ:",
-                    reply_markup=build_step_answer_mode_markup()
-                )
+                try:
+                    await callback.message.edit_text(
+                        f"{progress_indicator}\n\n"
+                        f"❔{question_text}\n\n"
+                        f"✏️ Редактировать последний ответ:\n\n"
+                        f"Предыдущий ответ:\n{prev_answer}\n\n"
+                        f"Введи новый ответ:",
+                        reply_markup=build_step_answer_mode_markup()
+                    )
+                except TelegramBadRequest as e:
+                    # Handle "message is not modified" error - this is normal when content is the same
+                    error_message = str(e).lower()
+                    if "message is not modified" in error_message:
+                        logger.debug(f"Message not modified (content unchanged) for edit_answer: {e}")
+                        # Message is already showing the correct content, nothing to do
+                    else:
+                        logger.warning(f"TelegramBadRequest when editing message for edit_answer: {e}")
+                        # Re-raise if it's a different error
+                        raise
+                
                 await state.update_data(action="edit_answer", previous_answer=prev_answer, current_question_id=question_id)
                 await state.set_state(StepState.answer_mode)
                 await callback.answer()
