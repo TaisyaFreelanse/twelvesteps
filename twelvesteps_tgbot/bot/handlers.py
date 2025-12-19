@@ -415,10 +415,31 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
             logger.info(f"Draft save result for user {telegram_id}: {save_result}")
             await state.update_data(action=None, current_draft=user_text)
             
+            # Get step info and current question WITHOUT calling get_current_step_question
+            # because it may create a new Tail and overwrite the draft we just saved
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
-            step_data = await get_current_step_question(telegram_id, username, first_name)
-            if step_data:
-                response_text = step_data.get("message", "")
+            
+            # Get current question text from active Tail without creating a new one
+            try:
+                question_id_data = await BACKEND_CLIENT.get_current_question_id(token)
+                question_id = question_id_data.get("question_id")
+                
+                response_text = ""
+                if question_id:
+                    # Get step_id from step_info
+                    step_id = step_info.get("step_id")
+                    if step_id:
+                        questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                        questions = questions_data.get("questions", []) if questions_data else []
+                        for q in questions:
+                            if q.get("id") == question_id:
+                                response_text = q.get("text", "")
+                                break
+            except Exception as e:
+                logger.warning(f"Failed to get current question text: {e}")
+                response_text = ""
+            
+            if step_info.get("step_number") and response_text:
                 progress_indicator = format_step_progress_indicator(
                     step_number=step_info.get("step_number"),
                     total_steps=step_info.get("total_steps", 12),
@@ -426,16 +447,11 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
                     answered_questions=step_info.get("answered_questions", 0),
                     total_questions=step_info.get("total_questions", 0)
                 )
-                full_text = (
-                    f"{progress_indicator}\n\n"
-                    f"❔{response_text}\n\n"
-                    f"📝 Поле для ответа:\n"
-                    f"💾 Черновик сохранён: {user_text[:100]}{'...' if len(user_text) > 100 else ''}"
-                )
-                await message.answer(
-                    "✅ Черновик сохранён!",
-                    reply_markup=build_step_answer_mode_markup()
-                )
+            
+            await message.answer(
+                "✅ Черновик сохранён!",
+                reply_markup=build_step_answer_mode_markup()
+            )
             return
         
         if action == "edit_answer":
