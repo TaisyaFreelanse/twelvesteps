@@ -3489,7 +3489,11 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
                     
                     # Check if there's a draft
                     draft_data = await BACKEND_CLIENT.get_draft(token)
-                    draft_text = draft_data.get("draft", "") if draft_data else ""
+                    # Backend returns DraftResponse with success and draft (which can be None)
+                    draft_text = ""
+                    if draft_data and draft_data.get("success"):
+                        draft_value = draft_data.get("draft")
+                        draft_text = draft_value if draft_value else ""
                     
                     if draft_text:
                         full_text = (
@@ -3556,7 +3560,11 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             # Save draft - prompt user to enter text or show existing draft
             # First check if there's an existing draft
             draft_data = await BACKEND_CLIENT.get_draft(token)
-            existing_draft = draft_data.get("draft", "") if draft_data and draft_data.get("success") else ""
+            # Backend returns DraftResponse with success and draft (which can be None)
+            existing_draft = ""
+            if draft_data and draft_data.get("success"):
+                draft_value = draft_data.get("draft")
+                existing_draft = draft_value if draft_value else ""
             
             step_data = await get_current_step_question(telegram_id, username, first_name)
             current_question_text = step_data.get("message", "") if step_data else ""
@@ -3700,9 +3708,15 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
         if data == "step_view_draft":
             # View and edit existing draft
             draft_data = await BACKEND_CLIENT.get_draft(token)
-            existing_draft = draft_data.get("draft", "") if draft_data and draft_data.get("success") else ""
+            # Backend returns DraftResponse with success and draft (which can be None)
+            # Check both success flag and that draft is not None/empty
+            if not draft_data or not draft_data.get("success"):
+                await callback.answer("Черновик не найден. Сохрани черновик сначала.")
+                return
             
-            if not existing_draft:
+            existing_draft = draft_data.get("draft")
+            # draft can be None even if success is True (edge case)
+            if not existing_draft or existing_draft.strip() == "":
                 await callback.answer("Черновик не найден. Сохрани черновик сначала.")
                 return
             
