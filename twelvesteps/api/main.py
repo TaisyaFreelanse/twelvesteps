@@ -531,10 +531,16 @@ async def save_draft(
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
     """Save draft answer in Tail.payload without closing Tail"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     service = StepFlowService(current_context.session)
+    logger.info(f"Saving draft for user {current_context.user.id}, text length: {len(draft_data.draft_text)}")
     success = await service.save_draft(current_context.user.id, draft_data.draft_text)
+    logger.info(f"Draft save result for user {current_context.user.id}: success={success}")
     
     if not success:
+        logger.warning(f"Failed to save draft for user {current_context.user.id}: no active Tail")
         raise HTTPException(
             status_code=400,
             detail="No active question found to save draft."
@@ -547,8 +553,13 @@ async def get_draft(
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
     """Get draft from active Tail if exists"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     service = StepFlowService(current_context.session)
     draft = await service.get_active_tail_draft(current_context.user.id)
+    
+    logger.info(f"Getting draft for user {current_context.user.id}: draft={draft[:50] if draft else None}...")
     
     return DraftResponse(success=draft is not None, draft=draft)
 

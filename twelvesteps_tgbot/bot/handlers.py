@@ -410,7 +410,9 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
         
         if action == "save_draft":
             # Save as draft
-            await BACKEND_CLIENT.save_draft(token, user_text)
+            logger.info(f"Saving draft for user {telegram_id}, text length: {len(user_text)}")
+            save_result = await BACKEND_CLIENT.save_draft(token, user_text)
+            logger.info(f"Draft save result for user {telegram_id}: {save_result}")
             await state.update_data(action=None, current_draft=user_text)
             
             step_info = await BACKEND_CLIENT.get_current_step_info(token)
@@ -580,7 +582,9 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
             return
         
         # Default: just save as draft if no action specified
-        await BACKEND_CLIENT.save_draft(token, user_text)
+        logger.info(f"Auto-saving draft for user {telegram_id}, text length: {len(user_text)}")
+        save_result = await BACKEND_CLIENT.save_draft(token, user_text)
+        logger.info(f"Auto-save draft result for user {telegram_id}: {save_result}")
         await state.update_data(current_draft=user_text)
         await message.answer(
             "💾 Текст сохранён как черновик.\n\n"
@@ -3707,16 +3711,28 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             
         if data == "step_view_draft":
             # View and edit existing draft
+            logger.info(f"Getting draft for user {telegram_id}")
             draft_data = await BACKEND_CLIENT.get_draft(token)
+            logger.info(f"Draft data received for user {telegram_id}: {draft_data}")
             # Backend returns DraftResponse with success and draft (which can be None)
             # Check both success flag and that draft is not None/empty
-            if not draft_data or not draft_data.get("success"):
+            if not draft_data:
+                logger.warning(f"No draft_data returned for user {telegram_id}")
                 await callback.answer("Черновик не найден. Сохрани черновик сначала.")
                 return
             
+            success = draft_data.get("success")
             existing_draft = draft_data.get("draft")
+            logger.info(f"Draft check for user {telegram_id}: success={success}, draft={existing_draft[:50] if existing_draft else None}...")
+            
+            if not success:
+                logger.warning(f"Draft success=False for user {telegram_id}")
+                await callback.answer("Черновик не найден. Сохрани черновик сначала.")
+                return
+            
             # draft can be None even if success is True (edge case)
             if not existing_draft or existing_draft.strip() == "":
+                logger.warning(f"Draft is None or empty for user {telegram_id}, success was {success}")
                 await callback.answer("Черновик не найден. Сохрани черновик сначала.")
                 return
             

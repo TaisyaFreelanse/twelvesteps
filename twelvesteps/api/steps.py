@@ -99,6 +99,9 @@ class StepFlowService:
     
     async def save_draft(self, user_id: int, draft_text: str) -> bool:
         """Save draft answer in Tail.payload without closing Tail"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         stmt = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -107,7 +110,10 @@ class StepFlowService:
         result = await self.session.execute(stmt)
         active_tail = result.scalars().first()
         
+        logger.info(f"save_draft for user {user_id}: active_tail={active_tail is not None}")
+        
         if not active_tail:
+            logger.warning(f"No active tail found for user {user_id} to save draft")
             return False
         
         # Update payload with draft
@@ -116,7 +122,15 @@ class StepFlowService:
         active_tail.payload["draft"] = draft_text
         active_tail.payload["draft_saved_at"] = datetime.now().isoformat()
         
+        logger.info(f"Saving draft to tail {active_tail.id}, payload keys: {list(active_tail.payload.keys())}")
+        
         await self.session.commit()
+        
+        # Verify it was saved
+        await self.session.refresh(active_tail)
+        saved_draft = active_tail.payload.get("draft") if active_tail.payload else None
+        logger.info(f"Draft saved verification for user {user_id}: saved_draft length={len(saved_draft) if saved_draft else 0}")
+        
         return True
     
     async def get_previous_answer(self, user_id: int, question_id: int) -> Optional[str]:
@@ -135,6 +149,9 @@ class StepFlowService:
     
     async def get_active_tail_draft(self, user_id: int) -> Optional[str]:
         """Get draft from active Tail if exists"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         stmt = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -143,8 +160,19 @@ class StepFlowService:
         result = await self.session.execute(stmt)
         active_tail = result.scalars().first()
         
-        if active_tail and active_tail.payload and "draft" in active_tail.payload:
-            return active_tail.payload["draft"]
+        logger.info(f"get_active_tail_draft for user {user_id}: active_tail={active_tail is not None}")
+        
+        if active_tail:
+            logger.info(f"Active tail found: id={active_tail.id}, payload={active_tail.payload}")
+            if active_tail.payload and "draft" in active_tail.payload:
+                draft_value = active_tail.payload["draft"]
+                logger.info(f"Draft found in payload: length={len(draft_value) if draft_value else 0}")
+                return draft_value
+            else:
+                logger.warning(f"No draft in payload for user {user_id}, payload keys: {list(active_tail.payload.keys()) if active_tail.payload else 'None'}")
+        else:
+            logger.warning(f"No active tail found for user {user_id}")
+        
         return None
     
     async def get_example_answers(self, question_id: int, user_id: int, limit: int = 5) -> list[dict]:
