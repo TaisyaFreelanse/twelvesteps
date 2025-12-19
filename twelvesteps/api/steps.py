@@ -117,19 +117,34 @@ class StepFlowService:
             return False
         
         # Update payload with draft
+        # IMPORTANT: For JSON fields, we need to create a new dict or use flag_modified
+        # to ensure SQLAlchemy tracks the change
         if active_tail.payload is None:
             active_tail.payload = {}
-        active_tail.payload["draft"] = draft_text
-        active_tail.payload["draft_saved_at"] = datetime.now().isoformat()
+        
+        # Create a new dict to ensure SQLAlchemy tracks the change
+        new_payload = dict(active_tail.payload) if active_tail.payload else {}
+        new_payload["draft"] = draft_text
+        new_payload["draft_saved_at"] = datetime.now().isoformat()
+        active_tail.payload = new_payload
+        
+        # Explicitly mark the field as modified for JSON columns
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(active_tail, "payload")
         
         logger.info(f"Saving draft to tail {active_tail.id}, payload keys: {list(active_tail.payload.keys())}")
         
-        await self.session.commit()
+        # Flush to ensure changes are staged before commit
+        await self.session.flush()
         
-        # Verify it was saved
+        # Commit the transaction
+        await self.session.commit()
+        logger.info(f"Committed draft save for tail {active_tail.id}")
+        
+        # Verify it was saved by re-fetching
         await self.session.refresh(active_tail)
         saved_draft = active_tail.payload.get("draft") if active_tail.payload else None
-        logger.info(f"Draft saved verification for user {user_id}: saved_draft length={len(saved_draft) if saved_draft else 0}")
+        logger.info(f"Draft saved verification for user {user_id}, tail {active_tail.id}: saved_draft length={len(saved_draft) if saved_draft else 0}, payload keys: {list(active_tail.payload.keys()) if active_tail.payload else 'None'}")
         
         return True
     
