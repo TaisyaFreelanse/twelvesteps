@@ -160,16 +160,20 @@ class StepFlowService:
         result = await self.session.execute(stmt)
         active_tail = result.scalars().first()
         
-        logger.info(f"get_active_tail_draft for user {user_id}: active_tail={active_tail is not None}")
+        logger.info(f"get_active_tail_draft for user {user_id}: active_tail={active_tail is not None}, tail_id={active_tail.id if active_tail else None}")
         
         if active_tail:
-            logger.info(f"Active tail found: id={active_tail.id}, payload={active_tail.payload}")
+            # Refresh to get latest data from database
+            await self.session.refresh(active_tail)
+            logger.info(f"Active tail found: id={active_tail.id}, payload type={type(active_tail.payload)}, payload={active_tail.payload}")
+            
             if active_tail.payload and "draft" in active_tail.payload:
                 draft_value = active_tail.payload["draft"]
                 logger.info(f"Draft found in payload: length={len(draft_value) if draft_value else 0}")
                 return draft_value
             else:
-                logger.warning(f"No draft in payload for user {user_id}, payload keys: {list(active_tail.payload.keys()) if active_tail.payload else 'None'}")
+                payload_keys = list(active_tail.payload.keys()) if active_tail.payload else None
+                logger.warning(f"No draft in payload for user {user_id}, tail_id={active_tail.id}, payload keys: {payload_keys}")
         else:
             logger.warning(f"No active tail found for user {user_id}")
         
@@ -333,8 +337,22 @@ class StepFlowService:
         active_tail = result_tail.scalars().first()
 
         # If found, return the existing question text
-        if active_tail and active_tail.question:
-            return active_tail.question.text
+        # IMPORTANT: Don't create a new Tail if one already exists, even if question is not loaded
+        # This preserves the draft in payload
+        if active_tail:
+            if active_tail.question:
+                return active_tail.question.text
+            else:
+                # Question not loaded, but Tail exists - fetch question text manually
+                if active_tail.step_question_id:
+                    stmt_q = select(Question).where(Question.id == active_tail.step_question_id)
+                    result_q = await self.session.execute(stmt_q)
+                    question = result_q.scalars().first()
+                    if question:
+                        return question.text
+                # If we can't get question text, still return existing Tail's question_id
+                # to prevent creating a new Tail that would overwrite the draft
+                return None  # Will be handled by caller
 
         # 2. Determine Current Step (Find IN_PROGRESS)
         stmt_user_step = select(UserStep).where(
