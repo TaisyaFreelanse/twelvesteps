@@ -833,6 +833,28 @@ async def get_section_detail(
     return ProfileSectionDetailResponse(section=detail_schema)
 
 
+@app.get("/profile/sections/{section_id}/answers")
+async def get_user_answers_for_section(
+    section_id: int,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Get user's answers for questions in a section"""
+    service = ProfileService(current_user.session)
+    answers = await service.repo.get_user_answers_for_section(current_user.user.id, section_id)
+    
+    return {
+        "answers": [
+            {
+                "question_id": answer.question_id,
+                "answer_text": answer.answer_text,
+                "version": answer.version,
+                "created_at": answer.created_at.isoformat() if answer.created_at else None
+            }
+            for answer in answers
+        ]
+    }
+
+
 @app.post("/profile/sections/{section_id}/answer")
 async def submit_profile_answer(
     section_id: int,

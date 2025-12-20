@@ -1957,22 +1957,30 @@ async def find_first_unanswered_question(token: str, start_from_section_id: Opti
     Find first unanswered question across all sections.
     Checks each section to find questions that haven't been answered yet.
     Returns dict with keys: section_id, question, section_info, or None if all answered.
+    
+    If start_from_section_id is provided, starts searching from the NEXT section (not the one specified).
     """
     sections_data = await BACKEND_CLIENT.get_profile_sections(token)
     sections = sections_data.get("sections", []) if sections_data else []
     
-    start_searching = start_from_section_id is None
+    # If start_from_section_id is provided, we want to start from the NEXT section
+    # So we skip until we find the start section, then continue to the next one
+    skip_until_found = start_from_section_id is not None
+    found_start_section = False
     
     for section in sections:
         section_id = section.get("id")
         if not section_id:
             continue
         
-        # If we're starting from a specific section, skip until we reach it
-        if not start_searching:
+        # If we need to skip until we find the start section
+        if skip_until_found:
             if section_id == start_from_section_id:
-                start_searching = True
-            else:
+                found_start_section = True
+                # Skip this section and continue to the next one
+                continue
+            elif not found_start_section:
+                # Haven't found the start section yet, keep skipping
                 continue
         
         # Get section detail to check questions
@@ -1986,28 +1994,33 @@ async def find_first_unanswered_question(token: str, start_from_section_id: Opti
         if not questions:
             continue
         
-        # Check each question to find first unanswered one
-        # We need to check if question has been answered by trying to get next question
-        # Since we don't have direct API for this, we'll use a workaround:
-        # Submit a dummy answer to get next_question, but that's inefficient
-        # Instead, let's just return the first question and let submit_profile_answer handle it
-        # But wait - that's the problem! We need to check answered status.
+        # Get user's answers for this section to check which questions are answered
+        try:
+            answers_data = await BACKEND_CLIENT.get_user_answers_for_section(token, section_id)
+            answered_question_ids = set()
+            if answers_data and "answers" in answers_data:
+                for answer in answers_data["answers"]:
+                    q_id = answer.get("question_id")
+                    if q_id:
+                        answered_question_ids.add(q_id)
+        except Exception as e:
+            # If API doesn't exist or fails, fall back to checking all questions
+            logger.warning(f"Failed to get answers for section {section_id}: {e}")
+            answered_question_ids = set()
         
-        # Better approach: Use get_next_question_for_section logic via submit_profile_answer
-        # Actually, we can't do that without submitting an answer...
+        # Find first unanswered question in this section
+        for question in questions:
+            question_id = question.get("id")
+            if question_id and question_id not in answered_question_ids:
+                # Found an unanswered question
+                return {
+                    "section_id": section_id,
+                    "question": question,
+                    "section_info": section_info
+                }
         
-        # For now, return first question - if it's already answered, submit_profile_answer
-        # will return the correct next_question when user tries to answer it again
-        # BUT this causes the duplication issue we're seeing!
-        
-        # The real fix: We need to check answered status before returning
-        # Since we can't do that easily without API changes, let's at least skip
-        # the section we just finished if start_from_section_id is provided
-        return {
-            "section_id": section_id,
-            "question": questions[0],
-            "section_info": section_info
-        }
+        # All questions in this section are answered, continue to next section
+        continue
     
     return None
 

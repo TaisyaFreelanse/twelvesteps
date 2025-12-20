@@ -220,6 +220,10 @@ class BackendClient:
     async def get_section_detail(self, access_token: str, section_id: int) -> Dict[str, Any]:
         """Get section details with questions"""
         return await self._request("GET", f"/profile/sections/{section_id}", token=access_token)
+    
+    async def get_user_answers_for_section(self, access_token: str, section_id: int) -> Dict[str, Any]:
+        """Get user's answers for questions in a section"""
+        return await self._request("GET", f"/profile/sections/{section_id}/answers", token=access_token)
 
     async def submit_profile_answer(
         self, access_token: str, section_id: int, question_id: Optional[int], answer_text: str
