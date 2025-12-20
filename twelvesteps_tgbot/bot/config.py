@@ -266,15 +266,28 @@ def build_settings_steps_list_markup(steps: list[dict]) -> InlineKeyboardMarkup:
 
 
 def build_settings_questions_list_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
-    """Markup for selecting a question in settings."""
+    """Markup for selecting a question in settings - shows questions as squares (3 per row)."""
     buttons = []
-    for i, q in enumerate(questions, 1):
-        buttons.append([InlineKeyboardButton(
-            text=f"{i}",
-            callback_data=f"step_settings_question_{q['id']}"
-        )])
+    # Create buttons in rows of 3 (like progress and feelings)
+    for i in range(0, len(questions), 3):
+        row = []
+        for j in range(3):
+            if i + j < len(questions):
+                q = questions[i + j]
+                q_id = q.get('id')
+                q_number = i + j + 1  # Question number (1-indexed)
+                
+                if q_id is None:
+                    continue
+                
+                row.append(InlineKeyboardButton(
+                    text=f"{q_number}",
+                    callback_data=f"step_settings_question_{q_id}"
+                ))
+        if row:
+            buttons.append(row)
     
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="step_settings_select_question")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="main_settings_steps")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -505,6 +518,13 @@ def build_free_story_markup() -> InlineKeyboardMarkup:
     ])
 
 
+def build_free_story_add_entry_markup() -> InlineKeyboardMarkup:
+    """Markup for adding free story entry (with back button)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="about_free_story")]
+    ])
+
+
 def build_mini_survey_markup(question_id: Optional[int] = None, can_skip: bool = False) -> InlineKeyboardMarkup:
     """Markup for mini survey with action buttons."""
     buttons = []
@@ -593,7 +613,7 @@ def build_progress_view_answers_steps_markup(steps: list[dict]) -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_progress_view_answers_questions_markup(questions: list[dict], step_id: int) -> InlineKeyboardMarkup:
+def build_progress_view_answers_questions_markup(questions: list[dict], step_id: int, back_callback: str = "progress_view_answers") -> InlineKeyboardMarkup:
     """Markup for selecting a question to view answer (numbers only, like feelings)."""
     buttons = []
     # Create buttons in rows of 3
@@ -624,7 +644,7 @@ def build_progress_view_answers_questions_markup(questions: list[dict], step_id:
         if row:
             buttons.append(row)
     
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="progress_view_answers")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

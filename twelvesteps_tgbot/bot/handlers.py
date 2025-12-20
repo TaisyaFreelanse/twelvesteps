@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
+from typing import Optional
 import json
 import logging
 import datetime
@@ -54,6 +55,7 @@ from bot.config import (
     build_profile_settings_markup,
     build_about_me_main_markup,
     build_free_story_markup,
+    build_free_story_add_entry_markup,
     build_mini_survey_markup,
     build_settings_steps_list_markup,
     build_settings_questions_list_markup,
@@ -1159,49 +1161,106 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
             }
             help_type_name = help_type_map.get(help_type, help_type)
             
-            # Special handling for "examples" - get examples from database instead of AI
+            # Special handling for "examples" - use AI with special prompt
             if help_type == "examples":
                 # Answer callback immediately
                 await safe_answer_callback(callback, "Загружаю примеры...")
                 
-                # Get current question_id
+                # Get step and question information for the prompt
                 try:
+                    step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                    step_number = step_info.get("step_number") if step_info else None
+                    step_id = step_info.get("step_id") if step_info else None
+                    
                     question_id_data = await BACKEND_CLIENT.get_current_question_id(token)
-                    question_id = question_id_data.get("question_id")
-                except Exception as e:
-                    logger.warning(f"Failed to get current question_id for examples: {e}")
-                    question_id = None
-                
-                if question_id:
-                    # Get example answers from database
-                    try:
-                        examples_data = await BACKEND_CLIENT.get_example_answers(token, question_id, limit=5)
-                        examples = examples_data.get("examples", []) if examples_data else []
+                    question_id = question_id_data.get("question_id") if question_id_data else None
+                    
+                    step_question = ""
+                    if question_id and step_id:
+                        # Get question text
+                        questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                        questions = questions_data.get("questions", []) if questions_data else []
+                        for q in questions:
+                            if q.get("id") == question_id:
+                                step_question = q.get("text", "")
+                                break
+                    
+                    if step_number and step_question:
+                        # Build prompt for examples
+                        prompt = f"""Пользователь нажал кнопку «Нужны примеры» (SOS) при работе по шагу.
+
+У тебя есть:
+- Шаг: {step_number}
+- Вопрос: {step_question}
+- Временное окно: за последние 72 часа
+- Контекст пользователя (если есть): {{user_context}} — HALT, вечер, тяга и т.п.
+
+Сформируй:
+1. 12–18 коротких бытовых ситуаций (1 строка), которые могли происходить у пользователя,
+   связанных с этим шагом и вопросом. Не создавай сцены, не давай интерпретаций.
+   Используй ситуации из разных сфер:
+   семья, работа, здоровье, финансы, онлайн, отношения, быт, дети, сообщество.
+
+2. Затем добавь 4 навигационные "крючка памяти" — куда можно посмотреть прямо сейчас:
+   – пролистай чат, календарь, фото
+   – ощущения в теле
+   – ускорения / замедления
+   – кто рядом был, где, и в какое время суток
+
+3. Заверши 5–7 ранними признаками — телесными, мыслительными или поведенческими
+   (например: "откладывание", "зажата челюсть", "внутреннее "пофиг"", "смотрю в одну точку")
+
+⚠️ Не предлагай готовые ответы. Не используй названия веществ. Не интерпретируй.
+⚠️ Не перегружай примеры деталями."""
+
+                        # Start SOS chat with examples prompt
+                        await state.set_state(SosStates.chatting)
+                        await state.update_data(help_type=help_type, conversation_history=[])
                         
-                        if examples:
-                            # Format examples as a list
-                            reply_text = "📋 Примеры ответов на этот вопрос:\n\n"
-                            for i, example in enumerate(examples, 1):
-                                example_text = example.get("text", example.get("preview", ""))
-                                reply_text += f"{i}. {example_text}\n\n"
-                            reply_text += "💡 Используй эти примеры как ориентир, но пиши своими словами."
-                        else:
+                        # Get AI response with timeout handling
+                        try:
+                            sos_response = await asyncio.wait_for(
+                                BACKEND_CLIENT.sos_chat(
+                                    access_token=token,
+                                    help_type=help_type,
+                                    custom_text=prompt
+                                ),
+                                timeout=15.0  # 15 second timeout
+                            )
+                            
+                            reply_text = sos_response.get("reply", "") if sos_response else ""
+                            
+                            # If reply is empty, show error message
+                            if not reply_text or reply_text.strip() == "":
+                                reply_text = "Извини, не удалось получить примеры. Попробуй ещё раз или опиши проблему своими словами."
+                        except asyncio.TimeoutError:
+                            logger.warning(f"SOS chat timeout for user {telegram_id}, help_type={help_type}")
+                            reply_text = (
+                                "🆘 Помощь: Хочу примеры\n\n"
+                                "⏱️ Запрос занимает больше времени, чем обычно. Попробуй:\n"
+                                "• Подождать немного и попробовать снова\n"
+                                "• Опиши проблему своими словами в разделе «Своё описание»\n\n"
+                                "💡 Если нужны конкретные примеры, напиши мне об этом."
+                            )
+                        except Exception as e:
+                            logger.exception(f"Error getting examples for user {telegram_id}: {e}")
                             reply_text = (
                                 "📋 Примеры ответов\n\n"
-                                "Пока нет примеров ответов других пользователей на этот вопрос.\n\n"
-                                "💡 Попробуй ответить своими словами, опираясь на свой опыт."
+                                "❌ Не удалось получить примеры. Попробуй позже."
                             )
-                    except Exception as e:
-                        logger.exception(f"Error getting examples for user {telegram_id}: {e}")
+                    else:
                         reply_text = (
                             "📋 Примеры ответов\n\n"
-                            "❌ Не удалось загрузить примеры. Попробуй позже."
+                            "❌ Не удалось определить текущий шаг или вопрос. Вернись к работе по шагу."
                         )
-                else:
+                        await state.clear()
+                except Exception as e:
+                    logger.exception(f"Error getting step/question info for examples: {e}")
                     reply_text = (
                         "📋 Примеры ответов\n\n"
-                        "❌ Не удалось определить текущий вопрос. Вернись к работе по шагу."
+                        "❌ Не удалось получить информацию о текущем шаге. Вернись к работе по шагу."
                     )
+                    await state.clear()
                 
                 await edit_long_message(
                     callback,
@@ -1770,44 +1829,38 @@ async def handle_step_settings_callback(callback: CallbackQuery, state: FSMConte
         return
     
     if data == "step_settings_select_question":
-        # Show list of steps first, then questions
+        # Use current active step to show questions directly (no step selection needed)
         try:
             token = await get_or_fetch_token(telegram_id, username, first_name)
             if token:
-                steps_data = await BACKEND_CLIENT.get_all_steps(token)
-                steps = steps_data.get("steps", []) if steps_data else []
-                
-                await callback.message.edit_text(
-                    "🗂 Выбрать вопрос вручную\n\n"
-                    "Сначала выбери шаг:",
-                    reply_markup=build_settings_select_step_for_question_markup(steps)
-                )
-        except Exception as e:
-            logger.exception("Error loading steps: %s", e)
-            await callback.answer("Ошибка загрузки шагов")
-        await callback.answer()
-        return
-    
-    if data.startswith("step_settings_question_step_"):
-        # User selected a step, now show questions
-        try:
-            step_id = int(data.split("_")[-1])
-            token = await get_or_fetch_token(telegram_id, username, first_name)
-            if token:
-                questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
-                questions = questions_data.get("questions", []) if questions_data else []
-                
-                await callback.message.edit_text(
-                    f"🗂 Выбрать вопрос вручную\n\n"
-                    f"Шаг {step_id}\n"
-                    "Выбери номер вопроса:",
-                    reply_markup=build_settings_questions_list_markup(questions, step_id)
-                )
+                # Get current step info
+                step_info = await BACKEND_CLIENT.get_current_step_info(token)
+                if step_info and step_info.get("step_id"):
+                    step_id = step_info.get("step_id")
+                    step_number = step_info.get("step_number", step_id)
+                    
+                    # Get questions for current step
+                    questions_data = await BACKEND_CLIENT.get_step_questions(token, step_id)
+                    questions = questions_data.get("questions", []) if questions_data else []
+                    
+                    if questions:
+                        await callback.message.edit_text(
+                            f"🗂 Выбрать вопрос вручную\n\n"
+                            f"Шаг {step_number}\n"
+                            "Выбери номер вопроса:",
+                            reply_markup=build_settings_questions_list_markup(questions, step_id)
+                        )
+                    else:
+                        await callback.answer("В этом шаге нет вопросов")
+                else:
+                    await callback.answer("Нет активного шага. Сначала выбери шаг.")
         except Exception as e:
             logger.exception("Error loading questions: %s", e)
             await callback.answer("Ошибка загрузки вопросов")
         await callback.answer()
         return
+    
+    # Removed step_settings_question_step_ handler - questions now use current active step directly
     
     if data.startswith("step_settings_question_"):
         # User selected a question - switch to it
@@ -1899,6 +1952,43 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
             pass
 
 
+async def find_first_unanswered_question(token: str) -> Optional[dict]:
+    """
+    Find first unanswered question across all sections by iterating through sections
+    and using submit_profile_answer logic (which handles already-answered questions correctly).
+    Returns dict with keys: section_id, question, section_info, or None if all answered.
+    """
+    sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+    sections = sections_data.get("sections", []) if sections_data else []
+    
+    for section in sections:
+        section_id = section.get("id")
+        if not section_id:
+            continue
+        
+        # Get section detail to check questions
+        section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id)
+        if not section_detail:
+            continue
+        
+        section_info = section_detail.get("section", {})
+        questions = section_info.get("questions", [])
+        
+        if not questions:
+            continue
+        
+        # Return first question from first section with questions
+        # The submit_profile_answer will handle if it's already answered
+        # by returning the correct next_question
+        return {
+            "section_id": section_id,
+            "question": questions[0],
+            "section_info": section_info
+        }
+    
+    return None
+
+
 async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> None:
     """Handle about me section callbacks"""
     data = callback.data
@@ -1924,6 +2014,10 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
         if data == "about_free_story":
             # Show free story section
             await callback.answer()
+            # Clear state if user was adding entry
+            current_state = await state.get_state()
+            if current_state == AboutMeStates.adding_entry:
+                await state.clear()
             await callback.message.edit_text(
                 "✍️ Свободный рассказ\n\n"
                 "Здесь ты можешь свободно рассказать о себе.",
@@ -1939,7 +2033,8 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
             
             await callback.message.edit_text(
                 "✍️ Свободный рассказ\n\n"
-                "Напиши то, что хочешь добавить:"
+                "Напиши то, что хочешь добавить:",
+                reply_markup=build_free_story_add_entry_markup()
             )
             return
         
@@ -2032,39 +2127,23 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                     )
                     return
                 
-                # Get first section only (optimize - don't loop through all)
-                first_section = sections[0] if sections else None
-                if not first_section:
-                    logger.warning("First section is None")
+                # Find first unanswered question across all sections
+                first_question_data = await find_first_unanswered_question(token)
+                
+                if not first_question_data:
+                    # All questions answered
                     await callback.message.edit_text(
-                        "👣 Пройти мини-опрос\n\n"
-                        "Вопросы пока не доступны.",
+                        "✅ Мини-опрос уже пройден!\n\n"
+                        "Все вопросы отвечены.",
                         reply_markup=build_about_me_main_markup()
                     )
                     return
                 
-                section_id = first_section.get("id")
-                logger.info(f"Loading section detail for section_id={section_id}")
+                section_id = first_question_data["section_id"]
+                first_question = first_question_data["question"]
+                section_info = first_question_data["section_info"]
                 
-                # Get section detail for first section only
-                section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id)
-                logger.info(f"Received section_detail: {section_detail}")
-                
-                section_info = section_detail.get("section", {}) if section_detail else {}
-                questions = section_info.get("questions", [])
-                logger.info(f"Found {len(questions)} questions in section {section_id}")
-                
-                if not questions:
-                    logger.warning(f"No questions found in section {section_id}")
-                    await callback.message.edit_text(
-                        "👣 Пройти мини-опрос\n\n"
-                        f"В разделе '{section_info.get('name', 'Неизвестный')}' пока нет вопросов.",
-                        reply_markup=build_about_me_main_markup()
-                    )
-                    return
-                
-                first_question = questions[0]
-                logger.info(f"First question: id={first_question.get('id')}, text={first_question.get('question_text', '')[:50]}...")
+                logger.info(f"Found first question: id={first_question.get('id')}, text={first_question.get('question_text', '')[:50]}...")
                 
                 # Store survey state
                 await state.update_data(
@@ -2093,56 +2172,77 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
             return
     
         if data == "about_survey_skip":
-            # Skip current question - move to next
+            # Skip current question - move to next unanswered question
             await callback.answer("Пропускаю вопрос...")
             try:
                 token = await get_or_fetch_token(telegram_id, username, first_name)
                 if token:
                     state_data = await state.get_data()
-                    section_id = state_data.get("survey_section_id")
+                    current_section_id = state_data.get("survey_section_id")
+                    current_question_id = state_data.get("survey_question_id")
                     
-                    # Get all sections and find next question
-                    sections_data = await BACKEND_CLIENT.get_profile_sections(token)
-                    sections = sections_data.get("sections", []) if sections_data else []
-                    
-                    next_question = None
-                    next_section_id = None
-                    
-                    # Find next unanswered question
-                    for section in sections:
-                        section_detail = await BACKEND_CLIENT.get_section_detail(token, section.get("id"))
-                        questions = section_detail.get("section", {}).get("questions", [])
-                        
-                        for q in questions:
-                            next_question = q
-                            next_section_id = section.get("id")
-                            break
-                        
-                        if next_question:
-                            break
-                    
-                    if next_question:
-                        question_text = next_question.get("question_text", "")
-                        is_optional = next_question.get("is_optional", False)
-                        
-                        await state.update_data(
-                            survey_section_id=next_section_id,
-                            survey_question_id=next_question.get("id"),
-                            survey_is_generated=False
+                    # Submit empty answer to skip current question and get next_question
+                    # The API will handle skipping and return the next unanswered question
+                    try:
+                        result = await BACKEND_CLIENT.submit_profile_answer(
+                            token, current_section_id, current_question_id, "[Пропущено]"
                         )
+                        next_question_data = result.get("next_question")
                         
-                        await callback.message.edit_text(
-                            f"👣 Пройти мини-опрос\n\n"
-                            f"❓ {question_text}",
-                            reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
-                        )
-                    else:
-                        await state.clear()
-                        await callback.message.edit_text(
-                            "✅ Мини-опрос завершён!\n\n"
-                            "Спасибо за ответы.",
-                            reply_markup=build_about_me_main_markup()
-                        )
+                        if next_question_data:
+                            question_text = next_question_data.get("text", "")
+                            is_optional = next_question_data.get("is_optional", True)
+                            is_generated = next_question_data.get("is_generated", False)
+                            next_question_id = next_question_data.get("id")
+                            
+                            await state.update_data(
+                                survey_section_id=current_section_id,
+                                survey_question_id=next_question_id,
+                                survey_is_generated=is_generated
+                            )
+                            
+                            await callback.message.edit_text(
+                                f"👣 Пройти мини-опрос\n\n"
+                                f"❓ {question_text}",
+                                reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                            )
+                        else:
+                            # No more questions - survey complete
+                            await state.clear()
+                            await callback.message.edit_text(
+                                "✅ Мини-опрос завершён!\n\n"
+                                "Спасибо за ответы.",
+                                reply_markup=build_about_me_main_markup()
+                            )
+                    except Exception as submit_error:
+                        # If submit fails, try to find next question manually
+                        logger.warning(f"Failed to skip via submit_profile_answer: {submit_error}, trying manual search")
+                        next_question_data = await find_first_unanswered_question(token)
+                        
+                        if next_question_data:
+                            section_id = next_question_data["section_id"]
+                            next_question = next_question_data["question"]
+                            question_text = next_question.get("question_text", "")
+                            is_optional = next_question.get("is_optional", False)
+                            
+                            await state.update_data(
+                                survey_section_id=section_id,
+                                survey_question_id=next_question.get("id"),
+                                survey_is_generated=False
+                            )
+                            
+                            await callback.message.edit_text(
+                                f"👣 Пройти мини-опрос\n\n"
+                                f"❓ {question_text}",
+                                reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                            )
+                        else:
+                            await state.clear()
+                            await callback.message.edit_text(
+                                "✅ Мини-опрос завершён!\n\n"
+                                "Спасибо за ответы.",
+                                reply_markup=build_about_me_main_markup()
+                            )
             except Exception as e:
                 logger.exception("Error skipping question: %s", e)
                 await callback.message.edit_text(
@@ -2399,7 +2499,7 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
         return
     
     if data.startswith("progress_step_"):
-        # Show step details
+        # Show question selection for a step immediately (no intermediate menu)
         step_id = int(data.replace("progress_step_", ""))
         
         try:
@@ -2409,15 +2509,15 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
             
             step_number = step_info.get("number", step_id)
             step_title = step_info.get("title", "")
-            answered = sum(1 for q in questions if q.get("status") == "COMPLETED")
-            total = len(questions)
             
-            progress_text = f"🪜 Шаг {step_number} — {step_title} ({answered}/{total})\n\n"
-            progress_text += "Выбери действие:"
+            # Store step_id in state for back navigation
+            await state.update_data(progress_view_step_id=step_id)
             
+            # Show question selection menu immediately (like in progress_answers_step_)
+            # Back button should return to main progress menu, not to view_answers
             await callback.message.edit_text(
-                progress_text,
-                reply_markup=build_progress_step_markup(step_id, step_number, step_title)
+                f"🪜 Шаг {step_number} — {step_title}\n\nВыбери вопрос:",
+                reply_markup=build_progress_view_answers_questions_markup(questions, step_id, back_callback="progress_main")
             )
         except Exception as e:
             logger.exception("Error loading step: %s", e)
@@ -2984,73 +3084,34 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                     reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
                 )
             else:
-                # All questions in current section answered - move to next section
-                # Get all sections to find next section with unanswered questions
-                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
-                sections = sections_data.get("sections", []) if sections_data else []
+                # All questions in current section answered - find next unanswered question
+                next_question_data = await find_first_unanswered_question(token)
                 
-                # Find next section with unanswered questions
-                next_section = None
-                current_section_found = False
-                
-                for section in sections:
-                    if current_section_found:
-                        # Check if this section has unanswered questions
-                        section_id_to_check = section.get("id")
-                        if section_id_to_check:
-                            section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id_to_check)
-                            if section_detail:
-                                section_info = section_detail.get("section", {})
-                                questions = section_info.get("questions", [])
-                                
-                                # Check if there are unanswered questions
-                                if questions:
-                                    # Get user's answers for this section to check if all answered
-                                    # For now, if section has questions, try it
-                                    next_section = section
-                                    break
+                if next_question_data:
+                    next_section_id = next_question_data["section_id"]
+                    next_question = next_question_data["question"]
+                    section_info = next_question_data["section_info"]
+                    question_text = next_question.get("question_text", "")
+                    is_optional = next_question.get("is_optional", False)
                     
-                    if section.get("id") == section_id:
-                        current_section_found = True
-                
-                if next_section:
-                    # Move to next section
-                    next_section_id = next_section.get("id")
-                    section_detail = await BACKEND_CLIENT.get_section_detail(token, next_section_id)
-                    section_info = section_detail.get("section", {}) if section_detail else {}
-                    questions = section_info.get("questions", [])
+                    await state.update_data(
+                        survey_section_id=next_section_id,
+                        survey_question_id=next_question.get("id"),
+                        survey_question_index=0,
+                        survey_mode=True,
+                        survey_is_generated=False
+                    )
                     
-                    if questions:
-                        first_question = questions[0]
-                        await state.update_data(
-                            survey_section_id=next_section_id,
-                            survey_question_id=first_question.get("id"),
-                            survey_question_index=0,
-                            survey_mode=True,
-                            survey_is_generated=False
-                        )
-                        
-                        question_text = first_question.get("question_text", "")
-                        is_optional = first_question.get("is_optional", False)
-                        
-                        await send_long_message(
-                            message,
-                            f"✅ Раздел завершён!\n\n"
-                            f"👣 Пройти мини-опрос\n\n"
-                            f"📋 {next_section.get('name', 'Следующий раздел')}\n\n"
-                            f"❓ {question_text}",
-                            reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
-                        )
-                    else:
-                        # No questions in next section, continue searching
-                        await state.clear()
-                        await message.answer(
-                            "✅ Мини-опрос завершён!\n\n"
-                            "Спасибо за ответы.",
-                            reply_markup=build_about_me_main_markup()
-                        )
+                    await send_long_message(
+                        message,
+                        f"✅ Раздел завершён!\n\n"
+                        f"👣 Пройти мини-опрос\n\n"
+                        f"📋 {section_info.get('name', 'Следующий раздел')}\n\n"
+                        f"❓ {question_text}",
+                        reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                    )
                 else:
-                    # All sections completed
+                    # All questions answered - survey complete
                     await state.clear()
                     await message.answer(
                         "✅ Мини-опрос завершён!\n\n"
