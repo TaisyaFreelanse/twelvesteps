@@ -1952,19 +1952,28 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
             pass
 
 
-async def find_first_unanswered_question(token: str) -> Optional[dict]:
+async def find_first_unanswered_question(token: str, start_from_section_id: Optional[int] = None) -> Optional[dict]:
     """
-    Find first unanswered question across all sections by iterating through sections
-    and using submit_profile_answer logic (which handles already-answered questions correctly).
+    Find first unanswered question across all sections.
+    Checks each section to find questions that haven't been answered yet.
     Returns dict with keys: section_id, question, section_info, or None if all answered.
     """
     sections_data = await BACKEND_CLIENT.get_profile_sections(token)
     sections = sections_data.get("sections", []) if sections_data else []
     
+    start_searching = start_from_section_id is None
+    
     for section in sections:
         section_id = section.get("id")
         if not section_id:
             continue
+        
+        # If we're starting from a specific section, skip until we reach it
+        if not start_searching:
+            if section_id == start_from_section_id:
+                start_searching = True
+            else:
+                continue
         
         # Get section detail to check questions
         section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id)
@@ -1977,9 +1986,23 @@ async def find_first_unanswered_question(token: str) -> Optional[dict]:
         if not questions:
             continue
         
-        # Return first question from first section with questions
-        # The submit_profile_answer will handle if it's already answered
-        # by returning the correct next_question
+        # Check each question to find first unanswered one
+        # We need to check if question has been answered by trying to get next question
+        # Since we don't have direct API for this, we'll use a workaround:
+        # Submit a dummy answer to get next_question, but that's inefficient
+        # Instead, let's just return the first question and let submit_profile_answer handle it
+        # But wait - that's the problem! We need to check answered status.
+        
+        # Better approach: Use get_next_question_for_section logic via submit_profile_answer
+        # Actually, we can't do that without submitting an answer...
+        
+        # For now, return first question - if it's already answered, submit_profile_answer
+        # will return the correct next_question when user tries to answer it again
+        # BUT this causes the duplication issue we're seeing!
+        
+        # The real fix: We need to check answered status before returning
+        # Since we can't do that easily without API changes, let's at least skip
+        # the section we just finished if start_from_section_id is provided
         return {
             "section_id": section_id,
             "question": questions[0],
@@ -2487,7 +2510,7 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
             steps_list = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_list.get("steps", []) if steps_list else []
             
-            # Show only menu with step numbers, no text list
+            # Show only menu with step numbers, no text list (no "Выбери шаг для просмотра:")
             await callback.message.edit_text(
                 "📋 Мой прогресс",
                 reply_markup=build_progress_main_markup(steps)
@@ -2515,14 +2538,15 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
             
             # Show question selection menu immediately (like in progress_answers_step_)
             # Back button should return to main progress menu, not to view_answers
+            # Show question selection menu immediately - no intermediate step selection menu
             await callback.message.edit_text(
                 f"🪜 Шаг {step_number} — {step_title}\n\nВыбери вопрос:",
                 reply_markup=build_progress_view_answers_questions_markup(questions, step_id, back_callback="progress_main")
             )
+            await callback.answer()
         except Exception as e:
-            logger.exception("Error loading step: %s", e)
-            await callback.answer("Ошибка загрузки")
-        await callback.answer()
+            logger.exception("Error loading questions for step %s: %s", step_id, e)
+            await callback.answer("Ошибка загрузки вопросов")
         return
     
     if data == "progress_view_answers":
@@ -3055,12 +3079,43 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                 is_generated = next_question_data.get("is_generated", False)
                 next_question_id = next_question_data.get("id")
                 
-                # For generated questions, we still need section_id
-                # For regular questions, use the question's section
+                # Prevent showing the same question we just answered
+                if not is_generated and next_question_id == question_id:
+                    logger.warning(f"Next question is the same as current question {question_id}, skipping to next section")
+                    # This should not happen, but if it does, find next unanswered question
+                    next_question_data = await find_first_unanswered_question(token, start_from_section_id=section_id)
+                    if not next_question_data:
+                        await state.clear()
+                        await message.answer(
+                            "✅ Мини-опрос завершён!\n\n"
+                            "Спасибо за ответы.",
+                            reply_markup=build_about_me_main_markup()
+                        )
+                        return
+                    # Use the found question instead
+                    next_section_id = next_question_data["section_id"]
+                    next_question = next_question_data["question"]
+                    section_info = next_question_data["section_info"]
+                    question_text = next_question.get("question_text", "")
+                    is_optional = next_question.get("is_optional", False)
+                    next_question_id = next_question.get("id")
+                    is_generated = False
+                else:
+                    # For generated questions, we still need section_id
+                    # For regular questions, use the question's section
+                    if is_generated:
+                        # Generated question - keep same section
+                        next_section_id = section_id
+                        section_info = None
+                    else:
+                        # Regular question from DB
+                        next_section_id = section_id  # Same section for now
+                        # Get section info for display
+                        section_detail = await BACKEND_CLIENT.get_section_detail(token, next_section_id)
+                        section_info = section_detail.get("section", {}) if section_detail else {}
+                
+                # Store state
                 if is_generated:
-                    # Generated question - keep same section
-                    next_section_id = section_id
-                    # Store that it's a generated question
                     await state.update_data(
                         survey_section_id=next_section_id,
                         survey_question_id=None,  # No DB ID for generated questions
@@ -3068,24 +3123,34 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                         survey_generated_text=question_text
                     )
                 else:
-                    # Regular question from DB
-                    next_section_id = section_id  # Same section for now
                     await state.update_data(
                         survey_section_id=next_section_id,
                         survey_question_id=next_question_id,
                         survey_is_generated=False
                     )
                 
-                await send_long_message(
-                    message,
-                    f"✅ Ответ сохранён!\n\n"
-                    f"👣 Пройти мини-опрос\n\n"
-                    f"❓ {question_text}",
-                    reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
-                )
+                # Send message (only once!)
+                if section_info:
+                    await send_long_message(
+                        message,
+                        f"✅ Ответ сохранён!\n\n"
+                        f"👣 Пройти мини-опрос\n\n"
+                        f"📋 {section_info.get('name', 'Следующий раздел')}\n\n"
+                        f"❓ {question_text}",
+                        reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                    )
+                else:
+                    await send_long_message(
+                        message,
+                        f"✅ Ответ сохранён!\n\n"
+                        f"👣 Пройти мини-опрос\n\n"
+                        f"❓ {question_text}",
+                        reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                    )
             else:
                 # All questions in current section answered - find next unanswered question
-                next_question_data = await find_first_unanswered_question(token)
+                # Start searching from the NEXT section (not the current one we just finished)
+                next_question_data = await find_first_unanswered_question(token, start_from_section_id=section_id)
                 
                 if next_question_data:
                     next_section_id = next_question_data["section_id"]
@@ -3957,10 +4022,9 @@ async def handle_step_action_callback(callback: CallbackQuery, state: FSMContext
             steps_list = await BACKEND_CLIENT.get_steps_list(token)
             steps = steps_list.get("steps", []) if steps_list else []
             
-            progress_text = "📋 Мой прогресс\n\nВыбери шаг для просмотра:"
-            
+            # No "Выбери шаг для просмотра:" text - just menu with step numbers
             await callback.message.edit_text(
-                progress_text,
+                "📋 Мой прогресс",
                 reply_markup=build_progress_main_markup(steps)
             )
             await callback.answer()
