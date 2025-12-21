@@ -2194,17 +2194,22 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                 question_text = first_question.get("question_text", "")
                 is_optional = first_question.get("is_optional", False)
                 
-                await callback.message.edit_text(
+                await edit_long_message(
+                    callback,
                     f"👣 Пройти мини-опрос\n\n"
                     f"❓ {question_text}",
                     reply_markup=build_mini_survey_markup(first_question.get("id"), can_skip=is_optional)
                 )
             except Exception as e:
                 logger.exception("Error starting survey: %s", e)
-                await callback.message.edit_text(
-                    f"❌ Ошибка загрузки опроса: {str(e)[:100]}\n\nПопробуй позже.",
-                    reply_markup=build_about_me_main_markup()
-                )
+                try:
+                    await edit_long_message(
+                        callback,
+                        f"❌ Ошибка загрузки опроса: {str(e)[:100]}\n\nПопробуй позже.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                except Exception as edit_error:
+                    logger.exception("Error editing error message: %s", edit_error)
             return
     
         if data == "about_survey_skip":
@@ -2267,24 +2272,30 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                                 survey_is_generated=False
                             )
                             
-                            await callback.message.edit_text(
+                            await edit_long_message(
+                                callback,
                                 f"👣 Пройти мини-опрос\n\n"
                                 f"❓ {question_text}",
                                 reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
                             )
                         else:
                             await state.clear()
-                            await callback.message.edit_text(
+                            await edit_long_message(
+                                callback,
                                 "✅ Мини-опрос завершён!\n\n"
                                 "Спасибо за ответы.",
                                 reply_markup=build_about_me_main_markup()
                             )
             except Exception as e:
                 logger.exception("Error skipping question: %s", e)
-                await callback.message.edit_text(
-                    "❌ Ошибка при пропуске вопроса. Попробуй позже.",
-                    reply_markup=build_about_me_main_markup()
-                )
+                try:
+                    await edit_long_message(
+                        callback,
+                        "❌ Ошибка при пропуске вопроса. Попробуй позже.",
+                        reply_markup=build_about_me_main_markup()
+                    )
+                except Exception as edit_error:
+                    logger.exception("Error editing error message: %s", edit_error)
             return
         
         if data == "about_survey_pause":
