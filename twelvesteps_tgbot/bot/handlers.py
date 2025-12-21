@@ -1217,15 +1217,17 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                         await state.set_state(SosStates.chatting)
                         await state.update_data(help_type=help_type, conversation_history=[])
                         
-                        # Get AI response with timeout handling
+                        # Get AI response - wait for LLM response (no timeout for examples to ensure we get answer)
                         try:
+                            # For examples, we want to wait as long as needed to get the answer
+                            # Use a very long timeout (120 seconds) to ensure we get the response
                             sos_response = await asyncio.wait_for(
                                 BACKEND_CLIENT.sos_chat(
                                     access_token=token,
                                     help_type=help_type,
                                     custom_text=prompt
                                 ),
-                                timeout=15.0  # 15 second timeout
+                                timeout=120.0  # 120 second timeout to ensure we get the answer from LLM
                             )
                             
                             reply_text = sos_response.get("reply", "") if sos_response else ""
@@ -1234,13 +1236,11 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                             if not reply_text or reply_text.strip() == "":
                                 reply_text = "Извини, не удалось получить примеры. Попробуй ещё раз или опиши проблему своими словами."
                         except asyncio.TimeoutError:
-                            logger.warning(f"SOS chat timeout for user {telegram_id}, help_type={help_type}")
+                            # Even with 120 seconds, if we timeout, show error
+                            logger.error(f"SOS chat timeout after 120s for user {telegram_id}, help_type={help_type}")
                             reply_text = (
                                 "🆘 Помощь: Хочу примеры\n\n"
-                                "⏱️ Запрос занимает больше времени, чем обычно. Попробуй:\n"
-                                "• Подождать немного и попробовать снова\n"
-                                "• Опиши проблему своими словами в разделе «Своё описание»\n\n"
-                                "💡 Если нужны конкретные примеры, напиши мне об этом."
+                                "❌ Запрос занимает слишком много времени. Попробуй позже или опиши проблему своими словами."
                             )
                         except Exception as e:
                             logger.exception(f"Error getting examples for user {telegram_id}: {e}")
