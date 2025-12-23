@@ -662,8 +662,8 @@ async def process_profile_free_text(
         sections_text = "\n".join(section_names)
         
         distribution_prompt = f"""
-You are a Profile Information Distributor.
-Analyze the following text and determine which profile sections it belongs to.
+You are a Profile Information Distributor with GPT-SELF architecture.
+Analyze the following text and determine which profile sections it belongs to, extracting entities and subblocks.
 
 Available sections:
 {sections_text}
@@ -677,14 +677,27 @@ Extracted information:
 For each relevant section, provide:
 - section_id: The ID of the section
 - content: The part of the text that belongs to this section
+- subblock_name: (optional) Name of subblock/entity if applicable (e.g., "Юрист", "Судья", "Фриланс" for Work section)
+- entity_type: (optional) Type of entity: "profession", "role", "relationship", "hobby", "value", "trauma", "strength", etc.
+- importance: (optional) Importance from 0.0 to 1.0 (1.0 = very important, 0.5 = moderate, 0.1 = minor)
+- is_core_personality: (optional) Boolean - does this define core personality/identity?
+- tags: (optional) Comma-separated tags: emotions, triggers, tone (e.g., "радость, уверенность, вечер")
 
-Return a JSON array with objects like:
-[
-    {{"section_id": 1, "content": "relevant text for section 1"}},
-    {{"section_id": 3, "content": "relevant text for section 3"}}
-]
+Examples:
+- For "Я работал юристом 6 лет, потом стал судьей на 8 лет, сейчас фрилансер" → 3 entries:
+  {{"section_id": 7, "content": "работал юристом 6 лет", "subblock_name": "Юрист", "entity_type": "profession", "importance": 0.8, "is_core_personality": true}}
+  {{"section_id": 7, "content": "стал судьей на 8 лет", "subblock_name": "Судья", "entity_type": "profession", "importance": 0.9, "is_core_personality": true}}
+  {{"section_id": 7, "content": "сейчас фрилансер", "subblock_name": "Фриланс", "entity_type": "profession", "importance": 1.0, "is_core_personality": true}}
 
-If no sections are relevant, return an empty array [].
+Return a JSON object with "sections" array:
+{{
+    "sections": [
+        {{"section_id": 1, "content": "...", "subblock_name": "...", "entity_type": "...", "importance": 0.9, "is_core_personality": true, "tags": "..."}},
+        ...
+    ]
+}}
+
+If no sections are relevant, return {{"sections": []}}.
 """
         
         # Call LLM to distribute information
@@ -745,16 +758,30 @@ If no sections are relevant, return an empty array [].
                 continue
             
             try:
-                # Save to section
+                # Extract metadata from distribution
+                subblock_name = dist.get("subblock_name")
+                entity_type = dist.get("entity_type")
+                importance = dist.get("importance", 1.0)
+                is_core_personality = dist.get("is_core_personality", False)
+                tags = dist.get("tags")
+                
+                # Save to section as new entry (history)
                 section_data = await profile_service.save_free_text(
-                    user_id,
-                    section_id,
-                    content
+                    user_id=user_id,
+                    section_id=section_id,
+                    text=content,
+                    subblock_name=subblock_name,
+                    entity_type=entity_type,
+                    importance=float(importance) if importance is not None else 1.0,
+                    is_core_personality=bool(is_core_personality),
+                    tags=tags
                 )
                 saved_sections.append({
                     "section_id": section_id,
                     "section_name": section.name,
-                    "data_id": section_data.id
+                    "data_id": section_data.id,
+                    "subblock_name": subblock_name,
+                    "entity_type": entity_type
                 })
             except Exception as e:
                 if debug:

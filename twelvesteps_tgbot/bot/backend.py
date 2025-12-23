@@ -261,6 +261,77 @@ class BackendClient:
         return await self._request(
             "GET", "/profile/free-text/history", token=access_token
         )
+    
+    async def get_section_history(
+        self, access_token: str, section_id: int, limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Get history of entries for a specific section"""
+        url = f"/profile/sections/{section_id}/history"
+        if limit:
+            url += f"?limit={limit}"
+        return await self._request("GET", url, token=access_token)
+    
+    async def create_section_data_entry(
+        self,
+        access_token: str,
+        section_id: int,
+        content: str,
+        subblock_name: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        importance: Optional[float] = 1.0,
+        is_core_personality: bool = False,
+        tags: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a new entry in a section (manual addition)"""
+        payload = {
+            "content": content,
+            "subblock_name": subblock_name,
+            "entity_type": entity_type,
+            "importance": importance,
+            "is_core_personality": is_core_personality,
+            "tags": tags
+        }
+        return await self._request(
+            "POST", f"/profile/sections/{section_id}/data", token=access_token, json=payload
+        )
+    
+    async def update_section_data_entry(
+        self,
+        access_token: str,
+        data_id: int,
+        content: Optional[str] = None,
+        subblock_name: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        importance: Optional[float] = None,
+        is_core_personality: Optional[bool] = None,
+        tags: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update an existing entry"""
+        payload = {}
+        if content is not None:
+            payload["content"] = content
+        if subblock_name is not None:
+            payload["subblock_name"] = subblock_name
+        if entity_type is not None:
+            payload["entity_type"] = entity_type
+        if importance is not None:
+            payload["importance"] = importance
+        if is_core_personality is not None:
+            payload["is_core_personality"] = is_core_personality
+        if tags is not None:
+            payload["tags"] = tags
+        
+        return await self._request(
+            "PUT", f"/profile/section-data/{data_id}", token=access_token, json=payload
+        )
+    
+    async def delete_section_data_entry(
+        self, access_token: str, data_id: int
+    ) -> Dict[str, Any]:
+        """Delete an entry"""
+        return await self._request(
+            "DELETE", f"/profile/section-data/{data_id}", token=access_token
+        )
 
     async def create_custom_section(
         self, access_token: str, name: str, icon: Optional[str] = None

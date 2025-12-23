@@ -40,6 +40,8 @@ from api.schemas import (
     CustomSectionRequest,
     SectionUpdateRequest,
     SectionSummaryResponse,
+    ProfileSectionDataCreateRequest,
+    ProfileSectionDataUpdateRequest,
     # Template schemas:
     AnswerTemplateSchema,
     AnswerTemplateListResponse,
@@ -1036,12 +1038,17 @@ async def get_free_text_history(
     from sqlalchemy import select
     from db.models import ProfileSectionData, ProfileSection
     
-    # Get all free text entries for user with section names
+    # Get all free text entries for user with section names and metadata
     query = (
         select(
             ProfileSectionData.id,
             ProfileSectionData.section_id,
             ProfileSectionData.content,
+            ProfileSectionData.subblock_name,
+            ProfileSectionData.entity_type,
+            ProfileSectionData.importance,
+            ProfileSectionData.is_core_personality,
+            ProfileSectionData.tags,
             ProfileSectionData.created_at,
             ProfileSectionData.updated_at,
             ProfileSection.name.label("section_name")
@@ -1068,6 +1075,11 @@ async def get_free_text_history(
             "section_name": entry.section_name,
             "content": content,
             "preview": preview,
+            "subblock_name": entry.subblock_name,
+            "entity_type": entry.entity_type,
+            "importance": entry.importance,
+            "is_core_personality": entry.is_core_personality,
+            "tags": entry.tags,
             "created_at": entry.created_at.isoformat() if entry.created_at else None,
             "updated_at": entry.updated_at.isoformat() if entry.updated_at else None
         })
@@ -1076,6 +1088,163 @@ async def get_free_text_history(
         "status": "success",
         "total": len(history_items),
         "entries": history_items
+    }
+
+
+@app.get("/profile/sections/{section_id}/history")
+async def get_section_history(
+    section_id: int,
+    limit: Optional[int] = None,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Get history of entries for a specific section"""
+    service = ProfileService(current_user.session)
+    entries = await service.get_section_data_history(
+        current_user.user.id,
+        section_id,
+        limit
+    )
+    
+    return {
+        "status": "success",
+        "section_id": section_id,
+        "total": len(entries),
+        "entries": [
+            {
+                "id": e.id,
+                "content": e.content,
+                "subblock_name": e.subblock_name,
+                "entity_type": e.entity_type,
+                "importance": e.importance,
+                "is_core_personality": e.is_core_personality,
+                "tags": e.tags,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "updated_at": e.updated_at.isoformat() if e.updated_at else None
+            }
+            for e in entries
+        ]
+    }
+
+
+@app.post("/profile/sections/{section_id}/data")
+async def create_section_data_entry(
+    section_id: int,
+    data: ProfileSectionDataCreateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Create a new entry in a section (manual addition)"""
+    service = ProfileService(current_user.session)
+    
+    entry = await service.save_free_text(
+        user_id=current_user.user.id,
+        section_id=section_id,
+        text=data.content,
+        subblock_name=data.subblock_name,
+        entity_type=data.entity_type,
+        importance=data.importance,
+        is_core_personality=data.is_core_personality,
+        tags=data.tags
+    )
+    
+    await current_user.session.commit()
+    
+    return {
+        "status": "success",
+        "message": "Entry created",
+        "entry": {
+            "id": entry.id,
+            "section_id": entry.section_id,
+            "content": entry.content,
+            "subblock_name": entry.subblock_name,
+            "entity_type": entry.entity_type,
+            "importance": entry.importance,
+            "is_core_personality": entry.is_core_personality,
+            "tags": entry.tags,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None
+        }
+    }
+
+
+@app.put("/profile/section-data/{data_id}")
+async def update_section_data_entry(
+    data_id: int,
+    data: ProfileSectionDataUpdateRequest,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Update an existing entry"""
+    from sqlalchemy import select
+    from db.models import ProfileSectionData
+    
+    query = select(ProfileSectionData).where(
+        ProfileSectionData.id == data_id,
+        ProfileSectionData.user_id == current_user.user.id
+    )
+    result = await current_user.session.execute(query)
+    entry = result.scalar_one_or_none()
+    
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    
+    # Update fields if provided
+    if data.content is not None:
+        entry.content = data.content
+    if data.subblock_name is not None:
+        entry.subblock_name = data.subblock_name
+    if data.entity_type is not None:
+        entry.entity_type = data.entity_type
+    if data.importance is not None:
+        entry.importance = data.importance
+    if data.is_core_personality is not None:
+        entry.is_core_personality = data.is_core_personality
+    if data.tags is not None:
+        entry.tags = data.tags
+    
+    await current_user.session.commit()
+    
+    return {
+        "status": "success",
+        "message": "Entry updated",
+        "entry": {
+            "id": entry.id,
+            "section_id": entry.section_id,
+            "content": entry.content,
+            "subblock_name": entry.subblock_name,
+            "entity_type": entry.entity_type,
+            "importance": entry.importance,
+            "is_core_personality": entry.is_core_personality,
+            "tags": entry.tags,
+            "updated_at": entry.updated_at.isoformat() if entry.updated_at else None
+        }
+    }
+
+
+@app.delete("/profile/section-data/{data_id}")
+async def delete_section_data_entry(
+    data_id: int,
+    current_user: CurrentUserContext = Depends(get_current_user)
+):
+    """Delete an entry"""
+    from sqlalchemy import select, delete
+    from db.models import ProfileSectionData
+    
+    query = select(ProfileSectionData).where(
+        ProfileSectionData.id == data_id,
+        ProfileSectionData.user_id == current_user.user.id
+    )
+    result = await current_user.session.execute(query)
+    entry = result.scalar_one_or_none()
+    
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    
+    await current_user.session.execute(
+        delete(ProfileSectionData).where(ProfileSectionData.id == data_id)
+    )
+    await current_user.session.commit()
+    
+    return {
+        "status": "success",
+        "message": "Entry deleted"
     }
 
 

@@ -134,7 +134,80 @@ def build_profile_actions_markup(section_id: int) -> InlineKeyboardMarkup:
     """Build action buttons for a profile section."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✍️ Свободный рассказ", callback_data=f"profile_free_text_{section_id}")],
+        [
+            InlineKeyboardButton(text="🗃️ История", callback_data=f"profile_history_{section_id}"),
+            InlineKeyboardButton(text="➕ Добавить", callback_data=f"profile_add_entry_{section_id}")
+        ],
         [InlineKeyboardButton(text="⏪ Назад", callback_data="profile_back")]
+    ])
+
+
+def build_section_history_markup(section_id: int, entries: List[Dict[str, Any]], page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Build markup for section history with pagination and edit buttons."""
+    buttons = []
+    
+    # Add entry buttons (show 5 per page)
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, len(entries))
+    
+    for i in range(start_idx, end_idx):
+        entry = entries[i]
+        entry_id = entry.get("id")
+        preview = entry.get("content", "")[:40] + "..." if len(entry.get("content", "")) > 40 else entry.get("content", "")
+        subblock = entry.get("subblock_name")
+        
+        # Button text: show subblock if exists, otherwise preview
+        button_text = f"📝 {i+1}. "
+        if subblock:
+            button_text += f"{subblock}: {preview}"
+        else:
+            button_text += preview
+        
+        # Limit button text length
+        if len(button_text) > 60:
+            button_text = button_text[:57] + "..."
+        
+        buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"profile_entry_{entry_id}"
+            )
+        ])
+    
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="◀️ Предыдущие", callback_data=f"profile_history_{section_id}_page_{page-1}"))
+    if end_idx < len(entries):
+        nav_buttons.append(InlineKeyboardButton(text="Следующие ▶️", callback_data=f"profile_history_{section_id}_page_{page+1}"))
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    # Action buttons
+    buttons.append([
+        InlineKeyboardButton(text="➕ Добавить запись", callback_data=f"profile_add_entry_{section_id}"),
+        InlineKeyboardButton(text="⏪ Назад", callback_data=f"profile_section_{section_id}")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_entry_detail_markup(entry_id: int, section_id: int) -> InlineKeyboardMarkup:
+    """Build markup for entry detail view with edit/delete options."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"profile_edit_{entry_id}"),
+            InlineKeyboardButton(text="🗑 Удалить", callback_data=f"profile_delete_{entry_id}")
+        ],
+        [InlineKeyboardButton(text="⏪ Назад к истории", callback_data=f"profile_history_{section_id}")]
+    ])
+
+
+def build_entry_edit_markup(entry_id: int, section_id: int) -> InlineKeyboardMarkup:
+    """Build markup for entry editing."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Сохранить", callback_data=f"profile_save_edit_{entry_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"profile_entry_{entry_id}")]
     ])
 
 

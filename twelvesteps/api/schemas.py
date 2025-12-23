@@ -214,11 +214,35 @@ class ProfileSectionDataSchema(BaseModel):
     user_id: int
     section_id: int
     content: Optional[str] = None
+    subblock_name: Optional[str] = None
+    entity_type: Optional[str] = None
+    importance: Optional[float] = None
+    is_core_personality: bool = False
+    tags: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ProfileSectionDataCreateRequest(BaseModel):
+    section_id: int
+    content: str
+    subblock_name: Optional[str] = None
+    entity_type: Optional[str] = None
+    importance: Optional[float] = 1.0
+    is_core_personality: bool = False
+    tags: Optional[str] = None
+
+
+class ProfileSectionDataUpdateRequest(BaseModel):
+    content: Optional[str] = None
+    subblock_name: Optional[str] = None
+    entity_type: Optional[str] = None
+    importance: Optional[float] = None
+    is_core_personality: Optional[bool] = None
+    tags: Optional[str] = None
 
 
 class ProfileSectionSchema(BaseModel):

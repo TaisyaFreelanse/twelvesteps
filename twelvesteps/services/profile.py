@@ -66,17 +66,42 @@ class ProfileService:
         return answer, None
 
     async def save_free_text(
-        self, user_id: int, section_id: Optional[int], text: str
+        self, 
+        user_id: int, 
+        section_id: Optional[int], 
+        text: str,
+        subblock_name: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        importance: Optional[float] = 1.0,
+        is_core_personality: bool = False,
+        tags: Optional[str] = None
     ) -> ProfileSectionData:
-        """Save free text. If section_id is None, it's a general free text"""
-        # For general free text, we might need special handling later
-        # For now, if section_id is None, we'll need to create a special section or handle differently
-        # But according to spec, general free text should be distributed across sections
-        # For now, we'll require section_id
+        """Save free text as a new entry (history). If section_id is None, it's a general free text"""
         if section_id is None:
             raise ValueError("section_id is required for free text")
         
-        return await self.repo.save_free_text(user_id, section_id, text)
+        return await self.repo.save_free_text(
+            user_id=user_id,
+            section_id=section_id,
+            content=text,
+            subblock_name=subblock_name,
+            entity_type=entity_type,
+            importance=importance,
+            is_core_personality=is_core_personality,
+            tags=tags
+        )
+    
+    async def get_section_data_history(
+        self, user_id: int, section_id: int, limit: Optional[int] = None
+    ) -> List[ProfileSectionData]:
+        """Get history of entries for a section"""
+        return await self.repo.get_section_data_history(user_id, section_id, limit)
+    
+    async def get_section_data_by_subblock(
+        self, user_id: int, section_id: int, subblock_name: str
+    ) -> List[ProfileSectionData]:
+        """Get all entries for a specific subblock"""
+        return await self.repo.get_section_data_by_subblock(user_id, section_id, subblock_name)
 
     async def create_custom_section(
         self, user_id: int, name: str, icon: Optional[str] = None

@@ -150,35 +150,108 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
             profile_summary += f"Ответ: {answer_text}\n\n"
     
     # Also collect free text data (ProfileSectionData) for each section
+    # Get all entries with metadata, ordered by importance and recency
     free_text_data_stmt = (
         select(
             ProfileSectionData.content,
+            ProfileSectionData.subblock_name,
+            ProfileSectionData.entity_type,
+            ProfileSectionData.importance,
+            ProfileSectionData.is_core_personality,
+            ProfileSectionData.tags,
+            ProfileSectionData.created_at,
             ProfileSection.name.label('section_name'),
             ProfileSection.order_index
         )
         .join(ProfileSection, ProfileSectionData.section_id == ProfileSection.id)
         .where(ProfileSectionData.user_id == user_id)
-        .order_by(ProfileSection.order_index, ProfileSectionData.created_at)
+        .order_by(
+            ProfileSection.order_index,
+            desc(ProfileSectionData.is_core_personality),  # Core personality first
+            desc(ProfileSectionData.importance),  # Then by importance
+            desc(ProfileSectionData.created_at)  # Then by recency
+        )
     )
     free_text_data_result = await session.execute(free_text_data_stmt)
     free_text_data = free_text_data_result.all()
     
     if free_text_data:
-        for content, section_name, _ in free_text_data:
-            if content and len(content.strip()) > 0:
-                # Add section header if not already added
-                if section_name not in processed_sections:
-                    if current_section is not None:
-                        profile_summary += "\n"
-                    profile_summary += f"[{section_name}]\n"
-                    current_section = section_name
-                    processed_sections.add(section_name)
-                elif current_section != section_name:
-                    # Section already exists, just add separator if different section
-                    if current_section is not None:
-                        profile_summary += "\n"
-                    current_section = section_name
-                profile_summary += f"Свободный рассказ: {content}\n\n"
+        # Group by section and subblock for better aggregation
+        section_data_map = {}
+        for row in free_text_data:
+            content, subblock_name, entity_type, importance, is_core, tags, created_at, section_name, order_idx = row
+            if not content or len(content.strip()) == 0:
+                continue
+            
+            if section_name not in section_data_map:
+                section_data_map[section_name] = {
+                    'order_index': order_idx,
+                    'subblocks': {}
+                }
+            
+            # Group by subblock if exists
+            subblock_key = subblock_name or "general"
+            if subblock_key not in section_data_map[section_name]['subblocks']:
+                section_data_map[section_name]['subblocks'][subblock_key] = []
+            
+            section_data_map[section_name]['subblocks'][subblock_key].append({
+                'content': content,
+                'entity_type': entity_type,
+                'importance': importance,
+                'is_core_personality': is_core,
+                'tags': tags,
+                'created_at': created_at
+            })
+        
+        # Build summary with aggregation
+        sorted_sections = sorted(section_data_map.items(), key=lambda x: x[1]['order_index'])
+        
+        for section_name, section_info in sorted_sections:
+            if section_name not in processed_sections:
+                if current_section is not None:
+                    profile_summary += "\n"
+                profile_summary += f"[{section_name}]\n"
+                current_section = section_name
+                processed_sections.add(section_name)
+            elif current_section != section_name:
+                if current_section is not None:
+                    profile_summary += "\n"
+                current_section = section_name
+            
+            # Aggregate entries by subblock
+            for subblock_name, entries in section_info['subblocks'].items():
+                # Sort entries: core personality first, then by importance and recency
+                entries.sort(key=lambda e: (
+                    not e['is_core_personality'],
+                    -(e['importance'] or 1.0),
+                    -(e['created_at'].timestamp() if e['created_at'] else 0)
+                ))
+                
+                # For each subblock, aggregate information
+                if subblock_name != "general":
+                    profile_summary += f"  • {subblock_name}"
+                    if entries[0].get('entity_type'):
+                        profile_summary += f" ({entries[0]['entity_type']})"
+                    profile_summary += ":\n"
+                
+                # Include most important/recent entries (limit to top 3 per subblock)
+                for entry in entries[:3]:
+                    content = entry['content']
+                    if subblock_name == "general":
+                        profile_summary += f"  - {content}"
+                    else:
+                        profile_summary += f"    {content}"
+                    
+                    # Add metadata if significant
+                    if entry.get('is_core_personality'):
+                        profile_summary += " [ядро личности]"
+                    if entry.get('tags'):
+                        profile_summary += f" [теги: {entry['tags']}]"
+                    profile_summary += "\n"
+                
+                # If there are more entries, summarize
+                if len(entries) > 3:
+                    profile_summary += f"    ... и ещё {len(entries) - 3} записей\n"
     
     if not profile_answers and not free_text_data:
         profile_summary += "Пользователь еще не заполнил профиль.\n\n"

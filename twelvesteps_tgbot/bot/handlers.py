@@ -56,6 +56,9 @@ from bot.config import (
     build_about_me_main_markup,
     build_free_story_markup,
     build_free_story_add_entry_markup,
+    build_section_history_markup,
+    build_entry_detail_markup,
+    build_entry_edit_markup,
     build_mini_survey_markup,
     build_settings_steps_list_markup,
     build_settings_questions_list_markup,
@@ -98,6 +101,8 @@ class ProfileStates(StatesGroup):
     answering_question = State()  # User is answering a profile question
     free_text_input = State()  # User is entering free text for a section
     creating_custom_section = State()  # User is creating a custom section
+    adding_entry = State()  # User is adding a manual entry to a section
+    editing_entry = State()  # User is editing an entry
 
 class SosStates(StatesGroup):
     help_type_selection = State()  # User is selecting type of help
@@ -165,6 +170,8 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.message(StateFilter(ProfileStates.answering_question))(handle_profile_answer)
     dp.message(StateFilter(ProfileStates.free_text_input))(handle_profile_free_text)
     dp.message(StateFilter(ProfileStates.creating_custom_section))(handle_profile_custom_section)
+    dp.message(StateFilter(ProfileStates.adding_entry))(handle_profile_add_entry)
+    dp.message(StateFilter(ProfileStates.editing_entry))(handle_profile_edit_entry)
     
     # 4.5. Template Selection Flow
     dp.callback_query(F.data.startswith("template_"))(handle_template_selection)
@@ -3061,6 +3068,235 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 await callback.answer("Вопрос пропущен")
             else:
                 await callback.answer("Это был последний вопрос")
+        
+        elif data.startswith("profile_history_"):
+            # View section history
+            parts = data.split("_")
+            section_id = int(parts[2])
+            page = 0
+            
+            # Check for pagination
+            if len(parts) > 3 and parts[3] == "page":
+                page = int(parts[4])
+            
+            history_data = await BACKEND_CLIENT.get_section_history(token, section_id)
+            entries = history_data.get("entries", []) if history_data else []
+            
+            if not entries:
+                section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+                section_name = section_data.get("section", {}).get("name", "Раздел")
+                await edit_long_message(
+                    callback,
+                    f"🗃️ История раздела: {section_name}\n\n"
+                    "История пока пуста. Добавь первую запись!",
+                    reply_markup=build_section_history_markup(section_id, entries, page)
+                )
+            else:
+                section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+                section_name = section_data.get("section", {}).get("name", "Раздел")
+                history_text = f"🗃️ История раздела: {section_name}\n\nВсего записей: {len(entries)}\n\n"
+                
+                # Show entries for current page
+                start_idx = page * 5
+                end_idx = min(start_idx + 5, len(entries))
+                
+                for i in range(start_idx, end_idx):
+                    entry = entries[i]
+                    content = entry.get("content", "")
+                    subblock = entry.get("subblock_name")
+                    created_at = entry.get("created_at", "")
+                    
+                    # Format date
+                    date_str = ""
+                    if created_at:
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            date_str = dt.strftime("%d.%m.%Y %H:%M")
+                        except:
+                            pass
+                    
+                    history_text += f"📝 Запись {i+1}"
+                    if subblock:
+                        history_text += f" ({subblock})"
+                    history_text += "\n"
+                    if date_str:
+                        history_text += f"📅 {date_str}\n"
+                    history_text += "\n"
+                
+                await edit_long_message(
+                    callback,
+                    history_text,
+                    reply_markup=build_section_history_markup(section_id, entries, page)
+                )
+            await callback.answer()
+        
+        elif data.startswith("profile_entry_"):
+            # View entry detail
+            entry_id = int(data.split("_")[-1])
+            
+            # Get entry from history (we need section_id, so get from all history)
+            history_data = await BACKEND_CLIENT.get_free_text_history(token)
+            entries = history_data.get("entries", []) if history_data else []
+            
+            entry = None
+            section_id = None
+            for e in entries:
+                if e.get("id") == entry_id:
+                    entry = e
+                    section_id = e.get("section_id")
+                    break
+            
+            if not entry:
+                await callback.answer("Запись не найдена")
+                return
+            
+            content = entry.get("content", "")
+            subblock = entry.get("subblock_name")
+            entity_type = entry.get("entity_type")
+            importance = entry.get("importance")
+            is_core = entry.get("is_core_personality", False)
+            tags = entry.get("tags")
+            created_at = entry.get("created_at", "")
+            
+            # Format date
+            date_str = ""
+            if created_at:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    date_str = dt.strftime("%d.%m.%Y %H:%M")
+                except:
+                    pass
+            
+            entry_text = f"📝 Запись\n\n"
+            if subblock:
+                entry_text += f"📌 Подблок: {subblock}\n"
+            if entity_type:
+                entry_text += f"🏷 Тип: {entity_type}\n"
+            if importance:
+                entry_text += f"⭐ Важность: {importance}\n"
+            if is_core:
+                entry_text += f"💎 Ядро личности: Да\n"
+            if tags:
+                entry_text += f"🏷 Теги: {tags}\n"
+            if date_str:
+                entry_text += f"📅 {date_str}\n"
+            entry_text += f"\n💬 Содержание:\n{content}"
+            
+            await edit_long_message(
+                callback,
+                entry_text,
+                reply_markup=build_entry_detail_markup(entry_id, section_id)
+            )
+            await callback.answer()
+        
+        elif data.startswith("profile_edit_"):
+            # Start editing entry
+            entry_id = int(data.split("_")[-1])
+            
+            # Get entry
+            history_data = await BACKEND_CLIENT.get_free_text_history(token)
+            entries = history_data.get("entries", []) if history_data else []
+            
+            entry = None
+            section_id = None
+            for e in entries:
+                if e.get("id") == entry_id:
+                    entry = e
+                    section_id = e.get("section_id")
+                    break
+            
+            if not entry:
+                await callback.answer("Запись не найдена")
+                return
+            
+            await state.update_data(
+                editing_entry_id=entry_id,
+                editing_section_id=section_id,
+                editing_content=entry.get("content", "")
+            )
+            await state.set_state(ProfileStates.editing_entry)
+            
+            await edit_long_message(
+                callback,
+                f"✏️ Редактирование записи\n\n"
+                f"Текущее содержание:\n{entry.get('content', '')}\n\n"
+                f"Напиши новое содержание:",
+                reply_markup=build_entry_edit_markup(entry_id, section_id)
+            )
+            await callback.answer()
+        
+        elif data.startswith("profile_delete_"):
+            # Delete entry
+            entry_id = int(data.split("_")[-1])
+            
+            # Get entry to find section_id
+            history_data = await BACKEND_CLIENT.get_free_text_history(token)
+            entries = history_data.get("entries", []) if history_data else []
+            
+            section_id = None
+            for e in entries:
+                if e.get("id") == entry_id:
+                    section_id = e.get("section_id")
+                    break
+            
+            if not section_id:
+                await callback.answer("Запись не найдена")
+                return
+            
+            try:
+                await BACKEND_CLIENT.delete_section_data_entry(token, entry_id)
+                await callback.answer("✅ Запись удалена")
+                
+                # Return to history
+                history_data = await BACKEND_CLIENT.get_section_history(token, section_id)
+                entries = history_data.get("entries", []) if history_data else []
+                
+                if not entries:
+                    section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+                    section_name = section_data.get("section", {}).get("name", "Раздел")
+                    await edit_long_message(
+                        callback,
+                        f"🗃️ История раздела: {section_name}\n\n"
+                        "История пуста.",
+                        reply_markup=build_section_history_markup(section_id, entries, 0)
+                    )
+                else:
+                    section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+                    section_name = section_data.get("section", {}).get("name", "Раздел")
+                    await edit_long_message(
+                        callback,
+                        f"🗃️ История раздела: {section_name}\n\nВсего записей: {len(entries)}",
+                        reply_markup=build_section_history_markup(section_id, entries, 0)
+                    )
+            except Exception as e:
+                logger.exception(f"Error deleting entry {entry_id}: {e}")
+                await callback.answer("❌ Ошибка при удалении")
+        
+        elif data.startswith("profile_add_entry_"):
+            # Add manual entry
+            section_id = int(data.split("_")[-1])
+            
+            await state.update_data(adding_section_id=section_id)
+            await state.set_state(ProfileStates.adding_entry)
+            
+            section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+            section_name = section_data.get("section", {}).get("name", "Раздел")
+            
+            await edit_long_message(
+                callback,
+                f"➕ Добавить запись в раздел: {section_name}\n\n"
+                "Напиши содержание записи:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="❌ Отмена", callback_data=f"profile_history_{section_id}")]
+                ])
+            )
+            await callback.answer()
+        
+        elif data.startswith("profile_save_edit_"):
+            # This is handled in message handler for editing_entry state
+            await callback.answer("Напиши новое содержание и нажми 'Сохранить'")
                 
     except Exception as exc:
         logger.exception("Error handling profile callback for %s: %s", telegram_id, exc)
@@ -3343,6 +3579,106 @@ async def handle_profile_free_text(message: Message, state: FSMContext) -> None:
     except Exception as exc:
         logger.exception("Error handling profile free text for %s: %s", telegram_id, exc)
         await message.answer("Ошибка при сохранении текста. Попробуй позже.")
+
+
+async def handle_profile_add_entry(message: Message, state: FSMContext) -> None:
+    """Handle manual entry addition to a section"""
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    text = message.text
+    
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("Ошибка авторизации. Нажми /start.")
+            await state.clear()
+            return
+        
+        state_data = await state.get_data()
+        section_id = state_data.get("adding_section_id")
+        
+        if not section_id:
+            await message.answer("Ошибка: не найден раздел.")
+            await state.clear()
+            return
+        
+        # Create entry
+        result = await BACKEND_CLIENT.create_section_data_entry(
+            token=token,
+            section_id=section_id,
+            content=text
+        )
+        
+        if result.get("status") == "success":
+            section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+            section_name = section_data.get("section", {}).get("name", "Раздел")
+            
+            await message.answer(
+                f"✅ Запись добавлена в раздел: {section_name}",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🗃️ Посмотреть историю", callback_data=f"profile_history_{section_id}")],
+                    [InlineKeyboardButton(text="⏪ Назад", callback_data=f"profile_section_{section_id}")]
+                ])
+            )
+        else:
+            await message.answer("❌ Ошибка при добавлении записи.")
+        
+        await state.clear()
+        
+    except Exception as exc:
+        logger.exception("Error handling profile add entry: %s", exc)
+        await message.answer("Ошибка. Попробуй позже.")
+        await state.clear()
+
+
+async def handle_profile_edit_entry(message: Message, state: FSMContext) -> None:
+    """Handle entry editing"""
+    telegram_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    text = message.text
+    
+    try:
+        token = await get_or_fetch_token(telegram_id, username, first_name)
+        if not token:
+            await message.answer("Ошибка авторизации. Нажми /start.")
+            await state.clear()
+            return
+        
+        state_data = await state.get_data()
+        entry_id = state_data.get("editing_entry_id")
+        section_id = state_data.get("editing_section_id")
+        
+        if not entry_id or not section_id:
+            await message.answer("Ошибка: не найдена запись.")
+            await state.clear()
+            return
+        
+        # Update entry
+        result = await BACKEND_CLIENT.update_section_data_entry(
+            token=token,
+            data_id=entry_id,
+            content=text
+        )
+        
+        if result.get("status") == "success":
+            await message.answer(
+                "✅ Запись обновлена!",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📝 Посмотреть запись", callback_data=f"profile_entry_{entry_id}")],
+                    [InlineKeyboardButton(text="🗃️ История", callback_data=f"profile_history_{section_id}")]
+                ])
+            )
+        else:
+            await message.answer("❌ Ошибка при обновлении записи.")
+        
+        await state.clear()
+        
+    except Exception as exc:
+        logger.exception("Error handling profile edit entry: %s", exc)
+        await message.answer("Ошибка. Попробуй позже.")
+        await state.clear()
 
 
 async def handle_profile_custom_section(message: Message, state: FSMContext) -> None:

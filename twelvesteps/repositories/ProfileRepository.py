@@ -120,31 +120,61 @@ class ProfileRepository:
         return answer
 
     async def save_free_text(
-        self, user_id: int, section_id: int, content: str
+        self, 
+        user_id: int, 
+        section_id: int, 
+        content: str,
+        subblock_name: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        importance: Optional[float] = 1.0,
+        is_core_personality: bool = False,
+        tags: Optional[str] = None
     ) -> ProfileSectionData:
-        """Save free text data for a section"""
-        # Check if data exists
+        """
+        Save free text data for a section as a NEW entry (history).
+        Instead of overwriting, creates a new record to preserve history.
+        """
+        data = ProfileSectionData(
+            user_id=user_id,
+            section_id=section_id,
+            content=content,
+            subblock_name=subblock_name,
+            entity_type=entity_type,
+            importance=importance or 1.0,
+            is_core_personality=is_core_personality,
+            tags=tags
+        )
+        self.db.add(data)
+        await self.db.flush()
+        return data
+    
+    async def get_section_data_history(
+        self, user_id: int, section_id: int, limit: Optional[int] = None
+    ) -> List[ProfileSectionData]:
+        """Get all entries (history) for a section, ordered by creation date"""
         query = select(ProfileSectionData).where(
             ProfileSectionData.user_id == user_id,
             ProfileSectionData.section_id == section_id
-        )
+        ).order_by(ProfileSectionData.created_at.desc())
+        
+        if limit:
+            query = query.limit(limit)
+        
         result = await self.db.execute(query)
-        existing = result.scalar_one_or_none()
-
-        if existing:
-            existing.content = content
-            self.db.add(existing)
-            await self.db.flush()
-            return existing
-        else:
-            data = ProfileSectionData(
-                user_id=user_id,
-                section_id=section_id,
-                content=content,
-            )
-            self.db.add(data)
-            await self.db.flush()
-            return data
+        return list(result.scalars().all())
+    
+    async def get_section_data_by_subblock(
+        self, user_id: int, section_id: int, subblock_name: str
+    ) -> List[ProfileSectionData]:
+        """Get all entries for a specific subblock"""
+        query = select(ProfileSectionData).where(
+            ProfileSectionData.user_id == user_id,
+            ProfileSectionData.section_id == section_id,
+            ProfileSectionData.subblock_name == subblock_name
+        ).order_by(ProfileSectionData.created_at.desc())
+        
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
 
     async def get_section_data(
         self, user_id: int, section_id: int

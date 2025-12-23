@@ -9,6 +9,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -539,6 +540,14 @@ class ProfileSectionData(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     section_id: Mapped[int] = mapped_column(ForeignKey("profile_sections.id", ondelete="CASCADE"), index=True)
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Свободный текст или JSON
+    
+    # History and subblock fields
+    subblock_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="Название подблока (например, 'Юрист', 'Судья')")
+    entity_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Тип сущности (profession, role, relationship и т.п.)")
+    importance: Mapped[Optional[float]] = mapped_column(Float, nullable=True, server_default=text("1.0"), comment="Важность записи (0.0-1.0)")
+    is_core_personality: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), comment="Входит ли в ядро личности")
+    tags: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="Теги через запятую (эмоции, триггеры, тон)")
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
