@@ -1217,6 +1217,19 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                         await state.set_state(SosStates.chatting)
                         await state.update_data(help_type=help_type, conversation_history=[])
                         
+                        # Show loading indicator to user
+                        loading_text = (
+                            "🆘 Помощь: Хочу примеры\n\n"
+                            "⏳ Загружаю примеры...\n\n"
+                            "Это может занять некоторое время (до 3 минут).\n"
+                            "Пожалуйста, подожди, я формирую примеры специально для тебя."
+                        )
+                        await edit_long_message(
+                            callback,
+                            loading_text,
+                            reply_markup=None  # No buttons during loading
+                        )
+                        
                         # Get AI response - wait for LLM response with extended timeout
                         try:
                             # For examples, we want to wait as long as needed to get the answer
