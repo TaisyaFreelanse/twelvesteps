@@ -332,7 +332,18 @@ class BackendClient:
             "message": message,
             "conversation_history": conversation_history or []
         }
-        return await self._request("POST", "/sos/chat", token=access_token, json=payload)
+        # For examples, use extended timeout (180 seconds) to ensure LLM response
+        # For other types, use extended timeout as well to be safe
+        extended_timeout = aiohttp.ClientTimeout(total=180)
+        url = f"{self.base_url}/sos/chat"
+        headers: Dict[str, str] = {}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        
+        async with aiohttp.ClientSession(timeout=extended_timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as response:
+                response.raise_for_status()
+                return await response.json()
 
     async def get_sos_message(self, telegram_id: int | str) -> str:
         """

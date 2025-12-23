@@ -1217,17 +1217,17 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                         await state.set_state(SosStates.chatting)
                         await state.update_data(help_type=help_type, conversation_history=[])
                         
-                        # Get AI response - wait for LLM response (no timeout for examples to ensure we get answer)
+                        # Get AI response - wait for LLM response with extended timeout
                         try:
                             # For examples, we want to wait as long as needed to get the answer
-                            # Use a very long timeout (120 seconds) to ensure we get the response
+                            # HTTP timeout is 180 seconds, so we use the same here
                             sos_response = await asyncio.wait_for(
                                 BACKEND_CLIENT.sos_chat(
                                     access_token=token,
                                     help_type=help_type,
                                     custom_text=prompt
                                 ),
-                                timeout=120.0  # 120 second timeout to ensure we get the answer from LLM
+                                timeout=180.0  # 180 second timeout to ensure we get the answer from LLM
                             )
                             
                             reply_text = sos_response.get("reply", "") if sos_response else ""
@@ -1236,8 +1236,8 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                             if not reply_text or reply_text.strip() == "":
                                 reply_text = "Извини, не удалось получить примеры. Попробуй ещё раз или опиши проблему своими словами."
                         except asyncio.TimeoutError:
-                            # Even with 120 seconds, if we timeout, show error
-                            logger.error(f"SOS chat timeout after 120s for user {telegram_id}, help_type={help_type}")
+                            # Even with 180 seconds, if we timeout, show error
+                            logger.error(f"SOS chat timeout after 180s for user {telegram_id}, help_type={help_type}")
                             reply_text = (
                                 "🆘 Помощь: Хочу примеры\n\n"
                                 "❌ Запрос занимает слишком много времени. Попробуй позже или опиши проблему своими словами."
