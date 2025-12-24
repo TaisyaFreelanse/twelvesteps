@@ -1223,6 +1223,15 @@ async def update_section_data_entry(
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
     
+    # Flush to ensure updated_at is set by the database
+    await current_user.session.flush()
+    
+    # Refresh to load updated_at from database
+    await current_user.session.refresh(entry)
+    
+    # Get updated_at value before commit
+    updated_at_value = entry.updated_at.isoformat() if entry.updated_at else None
+    
     await current_user.session.commit()
     
     return {
@@ -1237,7 +1246,7 @@ async def update_section_data_entry(
             "importance": entry.importance,
             "is_core_personality": entry.is_core_personality,
             "tags": entry.tags,
-            "updated_at": entry.updated_at.isoformat() if entry.updated_at else None
+            "updated_at": updated_at_value
         }
     }
 
