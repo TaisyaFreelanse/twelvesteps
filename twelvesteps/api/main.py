@@ -1014,23 +1014,31 @@ async def submit_general_free_text(
     
     # Use process_profile_free_text to distribute across sections
     from core.chat_service import process_profile_free_text
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
+        logger.info(f"Processing free text for user {current_user.user.id}: {free_text_data.text[:100]}...")
         result = await process_profile_free_text(
             user_id=current_user.user.id,
             free_text=free_text_data.text,
-            debug=False
+            debug=True  # Enable debug to see what's happening
         )
+        
+        saved_sections = result.get("saved_sections", [])
+        logger.info(f"Free text processed: {len(saved_sections)} sections saved: {[s.get('section_name') for s in saved_sections]}")
         
         # Update personalized prompt after distribution
         from services.personalization_service import update_personalized_prompt_from_all_answers
         await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
         await current_user.session.commit()
         
+        logger.info(f"Free text processing completed for user {current_user.user.id}")
+        
         return {
             "status": result.get("status", "success"),
             "message": result.get("message", "Free text processed and distributed"),
-            "saved_sections": result.get("saved_sections", []),
+            "saved_sections": saved_sections,
             "extracted_info": result.get("extracted_info", "")
         }
     except Exception as e:

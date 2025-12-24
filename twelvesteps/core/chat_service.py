@@ -766,6 +766,8 @@ If no sections are relevant, return {{"sections": []}}.
                 tags = dist.get("tags")
                 
                 # Save to section as new entry (history)
+                if debug:
+                    print(f"[process_profile_free_text] Saving to section {section_id}: content='{content[:50]}...', subblock='{subblock_name}'")
                 section_data = await profile_service.save_free_text(
                     user_id=user_id,
                     section_id=section_id,
@@ -776,6 +778,8 @@ If no sections are relevant, return {{"sections": []}}.
                     is_core_personality=bool(is_core_personality),
                     tags=tags
                 )
+                if debug:
+                    print(f"[process_profile_free_text] Saved entry with id={section_data.id}, content length={len(content) if content else 0}")
                 saved_sections.append({
                     "section_id": section_id,
                     "section_name": section.name,
@@ -788,7 +792,47 @@ If no sections are relevant, return {{"sections": []}}.
                     print(f"[process_profile_free_text] Error saving to section {section_id}: {e}")
                 continue
         
+        # If no sections were found, save to "Свободный рассказ" section (id=14) as fallback
+        if not saved_sections and free_text:
+            try:
+                if debug:
+                    print(f"[process_profile_free_text] No sections found, saving to fallback section 14")
+                # Try to find "Свободный рассказ" section (id=14)
+                free_story_section = await profile_service.get_section_detail(14, user_id)
+                if free_story_section:
+                    section_data = await profile_service.save_free_text(
+                        user_id=user_id,
+                        section_id=14,
+                        text=free_text,
+                        subblock_name=None,
+                        entity_type=None,
+                        importance=0.5,  # Lower importance for unclassified text
+                        is_core_personality=False,
+                        tags=None
+                    )
+                    if debug:
+                        print(f"[process_profile_free_text] Saved to fallback section 14 with id={section_data.id}")
+                    saved_sections.append({
+                        "section_id": 14,
+                        "section_name": free_story_section.name,
+                        "data_id": section_data.id,
+                        "subblock_name": None,
+                        "entity_type": None
+                    })
+                else:
+                    if debug:
+                        print(f"[process_profile_free_text] Fallback section 14 not found")
+            except Exception as e:
+                if debug:
+                    print(f"[process_profile_free_text] Error saving to fallback section: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        if debug:
+            print(f"[process_profile_free_text] Committing session with {len(saved_sections)} saved sections")
         await session.commit()
+        if debug:
+            print(f"[process_profile_free_text] Session committed successfully")
         
         return {
             "status": "success",

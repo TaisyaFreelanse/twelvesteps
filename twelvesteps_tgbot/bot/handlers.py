@@ -2129,12 +2129,19 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                 
                 if not entries:
                     history_text = "🗃️ История\n\n(История пока пуста)"
+                    markup = build_free_story_markup()
                 else:
                     history_text = f"🗃️ История\n\nВсего записей: {total}\n\n"
+                    # Build buttons for each entry
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    entry_buttons = []
+                    
                     for i, entry in enumerate(entries[:10], 1):  # Show first 10
+                        entry_id = entry.get("id")
                         section_name = entry.get("section_name", "Неизвестный раздел")
                         preview = entry.get("preview", "")
                         created_at = entry.get("created_at", "")
+                        subblock = entry.get("subblock_name")
                         
                         # Format date if available
                         date_str = ""
@@ -2147,20 +2154,52 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                                 pass
                         
                         history_text += f"{i}. {section_name}\n"
+                        if subblock:
+                            history_text += f"   📌 {subblock}\n"
                         if preview:
                             history_text += f"   {preview}\n"
                         if date_str:
                             history_text += f"   📅 {date_str}\n"
                         history_text += "\n"
+                        
+                        # Add button for entry
+                        button_text = f"📝 {i}. {section_name}"
+                        if subblock:
+                            button_text += f" ({subblock})"
+                        if len(button_text) > 60:
+                            button_text = button_text[:57] + "..."
+                        entry_buttons.append([
+                            InlineKeyboardButton(
+                                text=button_text,
+                                callback_data=f"profile_entry_{entry_id}"
+                            )
+                        ])
                     
                     if total > 10:
                         history_text += f"\n... и ещё {total - 10} записей"
+                    
+                    # Combine entry buttons with free story markup
+                    free_story_markup = build_free_story_markup()
+                    combined_buttons = entry_buttons + free_story_markup.inline_keyboard
+                    markup = InlineKeyboardMarkup(inline_keyboard=combined_buttons)
                 
-                await edit_long_message(
-                    callback,
-                    history_text,
-                    reply_markup=build_free_story_markup()
-                )
+                try:
+                    await edit_long_message(
+                        callback,
+                        history_text,
+                        reply_markup=markup
+                    )
+                    logger.info(f"Successfully showed free story history with {len(entry_buttons) if entries else 0} entry buttons")
+                except Exception as e:
+                    logger.warning(f"Failed to edit message for free story history: {e}, sending new message")
+                    try:
+                        await callback.message.answer(
+                            history_text,
+                            reply_markup=markup
+                        )
+                        logger.info(f"Successfully sent new message for free story history with entry buttons")
+                    except Exception as e2:
+                        logger.error(f"Failed to send new message for free story history: {e2}")
             except Exception as e:
                 logger.exception("Error loading history: %s", e)
                 await edit_long_message(
@@ -2375,15 +2414,38 @@ async def handle_about_entry_input(message: Message, state: FSMContext) -> None:
             return
         
         # Save as general free text (will be distributed across sections)
-        await BACKEND_CLIENT.submit_general_free_text(token, text)
+        logger.info(f"User {telegram_id} submitting general free text: {text[:100]}...")
+        result = await BACKEND_CLIENT.submit_general_free_text(token, text)
+        logger.info(f"Free text submission result: {result}")
+        
+        saved_sections = result.get("saved_sections", [])
+        status = result.get("status", "unknown")
         
         await state.clear()
         
-        await message.answer(
-            f"✅ Записано!\n\n"
-            f"Твоя информация сохранена.",
-            reply_markup=build_free_story_markup()
-        )
+        if status == "success" and saved_sections:
+            sections_list = ", ".join([s.get("section_name", "раздел") for s in saved_sections[:3]])
+            if len(saved_sections) > 3:
+                sections_list += f" и ещё {len(saved_sections) - 3}"
+            
+            await message.answer(
+                f"✅ Записано!\n\n"
+                f"Информация сохранена в разделы: {sections_list}.\n\n"
+                f"Можешь посмотреть историю, чтобы увидеть все записи.",
+                reply_markup=build_free_story_markup()
+            )
+        elif status == "success":
+            await message.answer(
+                f"✅ Записано!\n\n"
+                f"Твоя информация сохранена.",
+                reply_markup=build_free_story_markup()
+            )
+        else:
+            await message.answer(
+                f"⚠️ Запись обработана, но возможны проблемы.\n\n"
+                f"Проверь историю, чтобы убедиться, что всё сохранилось.",
+                reply_markup=build_free_story_markup()
+            )
     except Exception as exc:
         logger.exception("Error saving free story entry: %s", exc)
         await state.clear()
@@ -3285,11 +3347,25 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                         history_text += f"📅 {date_str}\n"
                     history_text += "\n"
                 
-                await edit_long_message(
-                    callback,
-                    history_text,
-                    reply_markup=build_section_history_markup(section_id, entries, page)
-                )
+                markup = build_section_history_markup(section_id, entries, page)
+                logger.info(f"Showing history for section {section_id} with {len(entries)} entries, page {page}, {len(markup.inline_keyboard)} button rows")
+                try:
+                    await edit_long_message(
+                        callback,
+                        history_text,
+                        reply_markup=markup
+                    )
+                    logger.info(f"Successfully edited message for section {section_id} history with entry buttons")
+                except Exception as e:
+                    logger.warning(f"Failed to edit message for section {section_id} history: {e}, sending new message")
+                    try:
+                        await callback.message.answer(
+                            history_text,
+                            reply_markup=markup
+                        )
+                        logger.info(f"Successfully sent new message for section {section_id} history with entry buttons")
+                    except Exception as e2:
+                        logger.error(f"Failed to send new message for section {section_id} history: {e2}")
             await callback.answer()
         
         elif data.startswith("profile_entry_"):
@@ -3345,11 +3421,25 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 entry_text += f"📅 {date_str}\n"
             entry_text += f"\n💬 Содержание:\n{content}"
             
-            await edit_long_message(
-                callback,
-                entry_text,
-                reply_markup=build_entry_detail_markup(entry_id, section_id)
-            )
+            markup = build_entry_detail_markup(entry_id, section_id)
+            logger.info(f"Showing entry detail {entry_id} with {len(markup.inline_keyboard)} button rows")
+            try:
+                await edit_long_message(
+                    callback,
+                    entry_text,
+                    reply_markup=markup
+                )
+                logger.info(f"Successfully edited message for entry {entry_id} with edit/delete buttons")
+            except Exception as e:
+                logger.warning(f"Failed to edit message for entry {entry_id}: {e}, sending new message")
+                try:
+                    await callback.message.answer(
+                        entry_text,
+                        reply_markup=markup
+                    )
+                    logger.info(f"Successfully sent new message for entry {entry_id} with edit/delete buttons")
+                except Exception as e2:
+                    logger.error(f"Failed to send new message for entry {entry_id}: {e2}")
             await callback.answer()
         
         elif data.startswith("profile_edit_"):
