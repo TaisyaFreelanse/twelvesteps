@@ -2074,11 +2074,26 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
             current_state = await state.get_state()
             if current_state == AboutMeStates.adding_entry:
                 await state.clear()
-            await callback.message.edit_text(
-                "✍️ Свободный рассказ\n\n"
-                "Здесь ты можешь свободно рассказать о себе.",
-                reply_markup=build_free_story_markup()
-            )
+            markup = build_free_story_markup()
+            logger.info(f"Showing free story section with {len(markup.inline_keyboard)} button rows")
+            try:
+                await callback.message.edit_text(
+                    "✍️ Свободный рассказ\n\n"
+                    "Здесь ты можешь свободно рассказать о себе.",
+                    reply_markup=markup
+                )
+                logger.info(f"Successfully edited message for free story with buttons")
+            except Exception as e:
+                logger.warning(f"Failed to edit message for free story: {e}, trying to send new message")
+                try:
+                    await callback.message.answer(
+                        "✍️ Свободный рассказ\n\n"
+                        "Здесь ты можешь свободно рассказать о себе.",
+                        reply_markup=markup
+                    )
+                    logger.info(f"Successfully sent new message for free story with buttons")
+                except Exception as e2:
+                    logger.error(f"Failed to send new message for free story: {e2}")
             return
     
         if data == "about_add_free":
@@ -2961,24 +2976,31 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
     username = callback.from_user.username
     first_name = callback.from_user.first_name
     
+    logger.info(f"Profile callback received: {data} from user {telegram_id}")
+    
     try:
         token = await get_or_fetch_token(telegram_id, username, first_name)
         if not token:
+            logger.warning(f"No token for user {telegram_id}")
             await callback.answer("Ошибка авторизации. Нажми /start.")
             return
         
         if data.startswith("profile_section_"):
             # User selected a section
             section_id = int(data.split("_")[-1])
+            logger.info(f"User {telegram_id} selected section {section_id}")
             section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
             if not section_data:
+                logger.error(f"Section {section_id} not found for user {telegram_id}")
                 await callback.answer("Ошибка: раздел не найден")
                 return
             section = section_data.get("section", {})
             if not section:
+                logger.error(f"Section data is empty for section {section_id}, user {telegram_id}")
                 await callback.answer("Ошибка: данные раздела не найдены")
                 return
             questions = section.get("questions", [])
+            logger.info(f"Section {section_id} ({section.get('name', 'Unknown')}) has {len(questions)} questions")
             
             if not questions:
                 # Section without questions - show section menu with history and add buttons
@@ -3542,6 +3564,18 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                     )
                 
                 # Send message (only once!)
+                # Create markup with survey buttons and section management buttons
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                survey_markup = build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                # Add section management buttons for current section
+                section_actions = [
+                    [InlineKeyboardButton(text="🗃️ История раздела", callback_data=f"profile_history_{next_section_id}")],
+                    [InlineKeyboardButton(text="➕ Добавить в раздел", callback_data=f"profile_add_entry_{next_section_id}")]
+                ]
+                # Combine markups
+                combined_buttons = survey_markup.inline_keyboard + section_actions
+                combined_markup = InlineKeyboardMarkup(inline_keyboard=combined_buttons)
+                
                 if section_info:
                     await send_long_message(
                         message,
@@ -3549,7 +3583,7 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                         f"👣 Пройти мини-опрос\n\n"
                         f"📋 {section_info.get('name', 'Следующий раздел')}\n\n"
                         f"❓ {question_text}",
-                        reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                        reply_markup=combined_markup
                     )
                 else:
                     await send_long_message(
@@ -3557,7 +3591,7 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                         f"✅ Ответ сохранён!\n\n"
                         f"👣 Пройти мини-опрос\n\n"
                         f"❓ {question_text}",
-                        reply_markup=build_mini_survey_markup(next_question_id if next_question_id else -1, can_skip=is_optional)
+                        reply_markup=combined_markup
                     )
             else:
                 # All questions in current section answered - find next unanswered question
@@ -3579,13 +3613,25 @@ async def handle_profile_answer(message: Message, state: FSMContext) -> None:
                         survey_is_generated=False
                     )
                     
+                    # Create markup with survey buttons and section management buttons
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    survey_markup = build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                    # Add section management buttons
+                    section_actions = [
+                        [InlineKeyboardButton(text="🗃️ История раздела", callback_data=f"profile_history_{section_id}")],
+                        [InlineKeyboardButton(text="➕ Добавить в раздел", callback_data=f"profile_add_entry_{section_id}")]
+                    ]
+                    # Combine markups
+                    combined_buttons = survey_markup.inline_keyboard + section_actions
+                    combined_markup = InlineKeyboardMarkup(inline_keyboard=combined_buttons)
+                    
                     await send_long_message(
                         message,
                         f"✅ Раздел завершён!\n\n"
                         f"👣 Пройти мини-опрос\n\n"
                         f"📋 {section_info.get('name', 'Следующий раздел')}\n\n"
                         f"❓ {question_text}",
-                        reply_markup=build_mini_survey_markup(next_question.get("id"), can_skip=is_optional)
+                        reply_markup=combined_markup
                     )
                 else:
                     # All questions answered - survey complete
