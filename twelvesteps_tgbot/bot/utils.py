@@ -131,7 +131,16 @@ async def edit_long_message(
                 error_message = str(e).lower()
                 if "message is not modified" in error_message:
                     logger.debug(f"Message not modified (content unchanged) for callback {callback.data}: {e}")
-                    # Message is already showing the correct content, nothing to do
+                    # If markup is provided and different, try to update only markup
+                    if reply_markup is not None:
+                        try:
+                            await callback.message.edit_reply_markup(reply_markup=reply_markup)
+                            logger.info(f"Updated reply markup for callback {callback.data}")
+                        except Exception as markup_error:
+                            logger.warning(f"Failed to update markup: {markup_error}, sending new message")
+                            # If markup update fails, send new message with markup
+                            await callback.message.answer(chunks[0], reply_markup=reply_markup)
+                    # Otherwise, message is already showing the correct content, nothing to do
                 else:
                     logger.error(f"TelegramBadRequest when editing message: {e}, trying to send new message instead")
                     # If edit fails, try to send new message
@@ -150,7 +159,16 @@ async def edit_long_message(
                 error_message = str(e).lower()
                 if "message is not modified" in error_message:
                     logger.debug(f"Message not modified (content unchanged) for callback {callback.data}: {e}")
-                    # Message is already showing the correct content, nothing to do
+                    # If markup is provided and different, try to update only markup
+                    if reply_markup is not None:
+                        try:
+                            await callback.message.edit_reply_markup(reply_markup=reply_markup)
+                            logger.info(f"Updated reply markup for callback {callback.data}")
+                        except Exception as markup_error:
+                            logger.warning(f"Failed to update markup: {markup_error}, sending new message")
+                            # If markup update fails, send new message with markup
+                            await callback.message.answer(chunks[0], reply_markup=reply_markup)
+                    # Otherwise, message is already showing the correct content, nothing to do
                 else:
                     logger.error(f"TelegramBadRequest when editing message: {e}, sending all chunks as new messages")
                     # If edit fails, send all as new messages
