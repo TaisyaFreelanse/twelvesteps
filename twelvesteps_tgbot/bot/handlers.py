@@ -2971,12 +2971,20 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
             # User selected a section
             section_id = int(data.split("_")[-1])
             section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+            if not section_data:
+                await callback.answer("Ошибка: раздел не найден")
+                return
             section = section_data.get("section", {})
+            if not section:
+                await callback.answer("Ошибка: данные раздела не найдены")
+                return
             questions = section.get("questions", [])
             
             if not questions:
                 # Section without questions - show section menu with history and add buttons
                 section_name = section.get('name', 'Раздел')
+                markup = build_profile_actions_markup(section_id)
+                logger.info(f"Section {section_id} ({section_name}) has no questions, showing buttons: {len(markup.inline_keyboard)} rows")
                 try:
                     await edit_long_message(
                         callback,
@@ -2986,20 +2994,27 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                         "• Добавить запись вручную\n"
                         "• Посмотреть историю записей\n"
                         "• Написать свободный рассказ",
-                        reply_markup=build_profile_actions_markup(section_id)
+                        reply_markup=markup
                     )
+                    logger.info(f"Successfully edited message for section {section_id} with buttons")
                 except Exception as e:
                     # If edit fails, send new message
                     logger.warning(f"Failed to edit message for section {section_id}: {e}, sending new message")
-                    await callback.message.answer(
-                        f"📝 {section_name}\n\n"
-                        "В этом разделе пока нет вопросов.\n\n"
-                        "Ты можешь:\n"
-                        "• Добавить запись вручную\n"
-                        "• Посмотреть историю записей\n"
-                        "• Написать свободный рассказ",
-                        reply_markup=build_profile_actions_markup(section_id)
-                    )
+                    try:
+                        await callback.message.answer(
+                            f"📝 {section_name}\n\n"
+                            "В этом разделе пока нет вопросов.\n\n"
+                            "Ты можешь:\n"
+                            "• Добавить запись вручную\n"
+                            "• Посмотреть историю записей\n"
+                            "• Написать свободный рассказ",
+                            reply_markup=markup
+                        )
+                        logger.info(f"Successfully sent new message for section {section_id} with buttons")
+                    except Exception as e2:
+                        logger.error(f"Failed to send new message for section {section_id}: {e2}")
+                        await callback.answer(f"Ошибка: {str(e2)[:50]}")
+                        return
                 await callback.answer()
                 return
             
@@ -3020,6 +3035,8 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 if all_answered:
                     # All questions answered - show section menu with history and add buttons
                     section_name = section.get('name', 'Раздел')
+                    markup = build_profile_actions_markup(section_id)
+                    logger.info(f"Section {section_id} ({section_name}) all questions answered, showing buttons: {len(markup.inline_keyboard)} rows")
                     try:
                         await edit_long_message(
                             callback,
@@ -3029,20 +3046,27 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                             "• Посмотреть историю записей\n"
                             "• Добавить новую запись вручную\n"
                             "• Написать свободный рассказ",
-                            reply_markup=build_profile_actions_markup(section_id)
+                            reply_markup=markup
                         )
+                        logger.info(f"Successfully edited message for section {section_id} with buttons")
                     except Exception as e:
                         # If edit fails, send new message
                         logger.warning(f"Failed to edit message for section {section_id}: {e}, sending new message")
-                        await callback.message.answer(
-                            f"📝 {section_name}\n\n"
-                            "✅ Все вопросы в этом разделе отвечены!\n\n"
-                            "Ты можешь:\n"
-                            "• Посмотреть историю записей\n"
-                            "• Добавить новую запись вручную\n"
-                            "• Написать свободный рассказ",
-                            reply_markup=build_profile_actions_markup(section_id)
-                        )
+                        try:
+                            await callback.message.answer(
+                                f"📝 {section_name}\n\n"
+                                "✅ Все вопросы в этом разделе отвечены!\n\n"
+                                "Ты можешь:\n"
+                                "• Посмотреть историю записей\n"
+                                "• Добавить новую запись вручную\n"
+                                "• Написать свободный рассказ",
+                                reply_markup=markup
+                            )
+                            logger.info(f"Successfully sent new message for section {section_id} with buttons")
+                        except Exception as e2:
+                            logger.error(f"Failed to send new message for section {section_id}: {e2}")
+                            await callback.answer(f"Ошибка: {str(e2)[:50]}")
+                            return
                     await state.set_state(ProfileStates.section_selection)
                     await callback.answer()
                     return
@@ -3103,11 +3127,19 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 # Combine markups
                 markup.inline_keyboard.append(skip_markup.inline_keyboard[0])
             
-            await edit_long_message(
-                callback,
-                intro_text + question_text,
-                reply_markup=markup
-            )
+            try:
+                await edit_long_message(
+                    callback,
+                    intro_text + question_text,
+                    reply_markup=markup
+                )
+            except Exception as e:
+                # If edit fails, send new message
+                logger.warning(f"Failed to edit message for section {section_id} question: {e}, sending new message")
+                await callback.message.answer(
+                    intro_text + question_text,
+                    reply_markup=markup
+                )
             await state.set_state(ProfileStates.answering_question)
             await callback.answer()
             
