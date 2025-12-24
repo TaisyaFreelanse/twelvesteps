@@ -2440,6 +2440,14 @@ async def handle_about_entry_input(message: Message, state: FSMContext) -> None:
                 f"Твоя информация сохранена.",
                 reply_markup=build_free_story_markup()
             )
+        elif status == "no_info":
+            # Even if no info was extracted, the text might have been saved to fallback section
+            # Check history to see if it was saved
+            await message.answer(
+                f"⚠️ Не удалось автоматически определить раздел для этой информации.\n\n"
+                f"Проверь историю — возможно, запись была сохранена в раздел «Свободный рассказ».",
+                reply_markup=build_free_story_markup()
+            )
         else:
             await message.answer(
                 f"⚠️ Запись обработана, но возможны проблемы.\n\n"
@@ -3880,7 +3888,7 @@ async def handle_profile_add_entry(message: Message, state: FSMContext) -> None:
         
         # Create entry
         result = await BACKEND_CLIENT.create_section_data_entry(
-            token=token,
+            access_token=token,
             section_id=section_id,
             content=text
         )
@@ -3932,7 +3940,7 @@ async def handle_profile_edit_entry(message: Message, state: FSMContext) -> None
         
         # Update entry
         result = await BACKEND_CLIENT.update_section_data_entry(
-            token=token,
+            access_token=token,
             data_id=entry_id,
             content=text
         )

@@ -648,13 +648,11 @@ async def process_profile_free_text(
         provider = OpenAI()
         analysis_result = await provider.analyze_profile(context)
         
-        if not analysis_result.update_needed or not analysis_result.extracted_info:
-            return {
-                "status": "no_info",
-                "message": "No new information extracted from the text"
-            }
+        # Use extracted info if available, otherwise use original text
+        extracted_info = analysis_result.extracted_info if analysis_result.extracted_info else free_text
         
-        extracted_info = analysis_result.extracted_info
+        # If analyze_profile didn't find new info, we'll still try to distribute the text
+        # This ensures that even simple texts get saved to appropriate sections
         
         # 5. Use LLM to distribute information across sections
         # Build section list for LLM
@@ -833,6 +831,15 @@ If no sections are relevant, return {{"sections": []}}.
         await session.commit()
         if debug:
             print(f"[process_profile_free_text] Session committed successfully")
+        
+        # Determine status based on whether we saved anything
+        if len(saved_sections) == 0:
+            return {
+                "status": "no_info",
+                "message": "No information could be distributed to any section",
+                "saved_sections": [],
+                "extracted_info": extracted_info
+            }
         
         return {
             "status": "success",
