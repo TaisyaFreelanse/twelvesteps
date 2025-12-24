@@ -2100,7 +2100,8 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
             try:
                 token = await get_or_fetch_token(telegram_id, username, first_name)
                 if not token:
-                    await callback.message.edit_text(
+                    await edit_long_message(
+                        callback,
                         "❌ Ошибка авторизации. Нажми /start.",
                         reply_markup=build_free_story_markup()
                     )
@@ -2140,13 +2141,15 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
                     if total > 10:
                         history_text += f"\n... и ещё {total - 10} записей"
                 
-                await callback.message.edit_text(
+                await edit_long_message(
+                    callback,
                     history_text,
                     reply_markup=build_free_story_markup()
                 )
             except Exception as e:
                 logger.exception("Error loading history: %s", e)
-                await callback.message.edit_text(
+                await edit_long_message(
+                    callback,
                     "🗃️ История\n\n❌ Ошибка при загрузке истории. Попробуй позже.",
                     reply_markup=build_free_story_markup()
                 )
@@ -2972,7 +2975,19 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
             questions = section.get("questions", [])
             
             if not questions:
-                await callback.answer("В этом разделе пока нет вопросов.")
+                # Section without questions - show section menu with history and add buttons
+                section_name = section.get('name', 'Раздел')
+                await edit_long_message(
+                    callback,
+                    f"📝 {section_name}\n\n"
+                    "В этом разделе пока нет вопросов.\n\n"
+                    "Ты можешь:\n"
+                    "• Добавить запись вручную\n"
+                    "• Посмотреть историю записей\n"
+                    "• Написать свободный рассказ",
+                    reply_markup=build_profile_actions_markup(section_id)
+                )
+                await callback.answer()
                 return
             
             # Show first question or intro

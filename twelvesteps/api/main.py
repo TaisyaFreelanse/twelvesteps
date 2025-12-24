@@ -812,27 +812,35 @@ async def get_section_detail(
     current_user: CurrentUserContext = Depends(get_current_user)
 ) -> ProfileSectionDetailResponse:
     """Get section details with questions"""
-    service = ProfileService(current_user.session)
-    section = await service.get_section_detail(section_id, current_user.user.id)
-    
-    if not section:
-        raise HTTPException(status_code=404, detail="Section not found")
-    
-    # Convert to detail schema with questions
-    detail_schema = ProfileSectionDetailSchema(
-        id=section.id,
-        name=section.name,
-        icon=section.icon,
-        is_custom=section.is_custom,
-        user_id=section.user_id,
-        order_index=section.order_index,
-        created_at=section.created_at,
-        updated_at=section.updated_at,
-        questions=[q for q in section.questions],
-        has_data=getattr(section, 'has_data', False),
-    )
-    
-    return ProfileSectionDetailResponse(section=detail_schema)
+    try:
+        service = ProfileService(current_user.session)
+        section = await service.get_section_detail(section_id, current_user.user.id)
+        
+        if not section:
+            raise HTTPException(status_code=404, detail="Section not found")
+        
+        # Convert to detail schema with questions
+        detail_schema = ProfileSectionDetailSchema(
+            id=section.id,
+            name=section.name,
+            icon=section.icon,
+            is_custom=section.is_custom,
+            user_id=section.user_id,
+            order_index=section.order_index,
+            created_at=section.created_at,
+            updated_at=section.updated_at,
+            questions=[q for q in section.questions],
+            has_data=getattr(section, 'has_data', False),
+        )
+        
+        return ProfileSectionDetailResponse(section=detail_schema)
+    except Exception as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error in get_section_detail for section_id={section_id}, user_id={current_user.user.id}: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/profile/sections/{section_id}/answers")

@@ -179,13 +179,23 @@ class ProfileRepository:
     async def get_section_data(
         self, user_id: int, section_id: int
     ) -> Optional[ProfileSectionData]:
-        """Get user's data for a section"""
-        query = select(ProfileSectionData).where(
-            ProfileSectionData.user_id == user_id,
-            ProfileSectionData.section_id == section_id
-        )
-        result = await self.db.execute(query)
-        return result.scalar_one_or_none()
+        """Get user's latest data for a section (for backward compatibility)"""
+        try:
+            # Get the most recent entry for this section
+            query = select(ProfileSectionData).where(
+                ProfileSectionData.user_id == user_id,
+                ProfileSectionData.section_id == section_id
+            ).order_by(ProfileSectionData.created_at.desc()).limit(1)
+            result = await self.db.execute(query)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            # If migration not applied and new columns don't exist, log and return None
+            # This allows the endpoint to work even if migration is not applied yet
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error loading section data for user {user_id}, section {section_id} (possibly migration not applied): {e}")
+            # Return None to indicate no data found (graceful degradation)
+            return None
 
     async def get_user_answers_for_section(
         self, user_id: int, section_id: int

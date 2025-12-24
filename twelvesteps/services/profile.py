@@ -24,17 +24,31 @@ class ProfileService:
         self, section_id: int, user_id: Optional[int] = None
     ) -> Optional[ProfileSection]:
         """Get section with questions and check if user has data"""
-        section = await self.repo.get_section_by_id(section_id)
-        if not section:
-            return None
+        try:
+            section = await self.repo.get_section_by_id(section_id)
+            if not section:
+                return None
 
-        # Check if user has data for this section
-        if user_id:
-            data = await self.repo.get_section_data(user_id, section_id)
-            # This will be used in the response schema
-            section.has_data = data is not None
+            # Check if user has data for this section
+            if user_id:
+                try:
+                    data = await self.repo.get_section_data(user_id, section_id)
+                    # This will be used in the response schema
+                    section.has_data = data is not None
+                except Exception as e:
+                    # If there's an error checking data (e.g., migration not applied),
+                    # just set has_data to False and continue
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Error checking section data for user {user_id}, section {section_id}: {e}")
+                    section.has_data = False
 
-        return section
+            return section
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in get_section_detail for section_id={section_id}, user_id={user_id}: {e}")
+            raise
 
     async def save_answer(
         self, user_id: int, question_id: int, answer_text: str
