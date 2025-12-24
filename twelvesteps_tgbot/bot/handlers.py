@@ -2990,11 +2990,64 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 await callback.answer()
                 return
             
-            # Show first question or intro
-            intro_text = f"📝 {section.get('name', 'Раздел')}\n\n"
-            intro_text += "Давай начнём с первого вопроса:\n\n"
+            # Check if all questions are already answered
+            answered_question_ids = set()
+            try:
+                answers_data = await BACKEND_CLIENT.get_user_answers_for_section(token, section_id)
+                if answers_data and "answers" in answers_data:
+                    for answer in answers_data["answers"]:
+                        q_id = answer.get("question_id")
+                        if q_id:
+                            answered_question_ids.add(q_id)
+                
+                # Check if all questions are answered
+                all_question_ids = {q.get("id") for q in questions if q.get("id")}
+                all_answered = len(all_question_ids) > 0 and all_question_ids.issubset(answered_question_ids)
+                
+                if all_answered:
+                    # All questions answered - show section menu with history and add buttons
+                    section_name = section.get('name', 'Раздел')
+                    await edit_long_message(
+                        callback,
+                        f"📝 {section_name}\n\n"
+                        "✅ Все вопросы в этом разделе отвечены!\n\n"
+                        "Ты можешь:\n"
+                        "• Посмотреть историю записей\n"
+                        "• Добавить новую запись вручную\n"
+                        "• Написать свободный рассказ",
+                        reply_markup=build_profile_actions_markup(section_id)
+                    )
+                    await state.set_state(ProfileStates.section_selection)
+                    await callback.answer()
+                    return
+            except Exception as e:
+                # If we can't check answers, continue to show first question
+                logger.warning(f"Failed to check answers for section {section_id}: {e}")
             
-            first_question = questions[0]
+            # Find first unanswered question
+            unanswered_questions = [q for q in questions if q.get("id") not in answered_question_ids]
+            
+            if not unanswered_questions:
+                # All questions answered (fallback)
+                section_name = section.get('name', 'Раздел')
+                await edit_long_message(
+                    callback,
+                    f"📝 {section_name}\n\n"
+                    "✅ Все вопросы в этом разделе отвечены!\n\n"
+                    "Ты можешь:\n"
+                    "• Посмотреть историю записей\n"
+                    "• Добавить новую запись вручную\n"
+                    "• Написать свободный рассказ",
+                    reply_markup=build_profile_actions_markup(section_id)
+                )
+                await state.set_state(ProfileStates.section_selection)
+                await callback.answer()
+                return
+            
+            # Show first unanswered question
+            first_question = unanswered_questions[0]
+            intro_text = f"📝 {section.get('name', 'Раздел')}\n\n"
+            intro_text += "Давай начнём с первого неотвеченного вопроса:\n\n"
             question_text = f"{first_question.get('question_text', '')}"
             
             # Store section and question info in state

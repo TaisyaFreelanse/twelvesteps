@@ -227,31 +227,77 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
                     -(e['created_at'].timestamp() if e['created_at'] else 0)
                 ))
                 
+                # Separate current and historical entries
+                # Most recent entry (by creation date) is considered "current"
+                # Older entries are "historical"
+                current_entries = []
+                historical_entries = []
+                
+                if entries:
+                    # Most recent entry is current
+                    current_entries = [entries[0]]
+                    historical_entries = entries[1:]
+                
                 # For each subblock, aggregate information
                 if subblock_name != "general":
                     profile_summary += f"  • {subblock_name}"
                     if entries[0].get('entity_type'):
                         profile_summary += f" ({entries[0]['entity_type']})"
                     profile_summary += ":\n"
-                
-                # Include most important/recent entries (limit to top 3 per subblock)
-                for entry in entries[:3]:
-                    content = entry['content']
-                    if subblock_name == "general":
-                        profile_summary += f"  - {content}"
-                    else:
-                        profile_summary += f"    {content}"
                     
-                    # Add metadata if significant
-                    if entry.get('is_core_personality'):
-                        profile_summary += " [ядро личности]"
-                    if entry.get('tags'):
-                        profile_summary += f" [теги: {entry['tags']}]"
-                    profile_summary += "\n"
-                
-                # If there are more entries, summarize
-                if len(entries) > 3:
-                    profile_summary += f"    ... и ещё {len(entries) - 3} записей\n"
+                    # Show current entry first (if exists)
+                    if current_entries:
+                        entry = current_entries[0]
+                        content = entry['content']
+                        profile_summary += f"    Сейчас: {content}"
+                        if entry.get('is_core_personality'):
+                            profile_summary += " [ядро личности]"
+                        if entry.get('tags'):
+                            profile_summary += f" [теги: {entry['tags']}]"
+                        profile_summary += "\n"
+                    
+                    # Show historical entries (limit to top 2 most important)
+                    if historical_entries:
+                        # Sort historical by importance (not recency)
+                        historical_sorted = sorted(
+                            historical_entries[:2],
+                            key=lambda e: (not e.get('is_core_personality'), -(e.get('importance') or 1.0))
+                        )
+                        if len(historical_sorted) == 1:
+                            entry = historical_sorted[0]
+                            profile_summary += f"    Ранее: {entry['content']}"
+                            if entry.get('is_core_personality'):
+                                profile_summary += " [ядро личности]"
+                            profile_summary += "\n"
+                        elif len(historical_sorted) > 1:
+                            # Multiple historical entries - aggregate
+                            profile_summary += "    Ранее: "
+                            historical_texts = []
+                            for entry in historical_sorted:
+                                historical_texts.append(entry['content'])
+                            profile_summary += ", ".join(historical_texts)
+                            if any(e.get('is_core_personality') for e in historical_sorted):
+                                profile_summary += " [ядро личности]"
+                            profile_summary += "\n"
+                        
+                        # If there are more historical entries, mention count
+                        if len(historical_entries) > 2:
+                            profile_summary += f"    ... и ещё {len(historical_entries) - 2} исторических записей\n"
+                else:
+                    # General entries (no subblock) - just list them
+                    # Include most important/recent entries (limit to top 3)
+                    for entry in entries[:3]:
+                        content = entry['content']
+                        profile_summary += f"  - {content}"
+                        if entry.get('is_core_personality'):
+                            profile_summary += " [ядро личности]"
+                        if entry.get('tags'):
+                            profile_summary += f" [теги: {entry['tags']}]"
+                        profile_summary += "\n"
+                    
+                    # If there are more entries, summarize
+                    if len(entries) > 3:
+                        profile_summary += f"  ... и ещё {len(entries) - 3} записей\n"
     
     if not profile_answers and not free_text_data:
         profile_summary += "Пользователь еще не заполнил профиль.\n\n"

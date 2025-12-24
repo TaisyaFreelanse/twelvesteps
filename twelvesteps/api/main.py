@@ -1154,6 +1154,10 @@ async def create_section_data_entry(
         tags=data.tags
     )
     
+    # IMPORTANT: Update personalized prompt after creating entry
+    from services.personalization_service import update_personalized_prompt_from_all_answers
+    await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
     await current_user.session.commit()
     
     return {
@@ -1207,6 +1211,10 @@ async def update_section_data_entry(
     if data.tags is not None:
         entry.tags = data.tags
     
+    # IMPORTANT: Update personalized prompt after updating entry
+    from services.personalization_service import update_personalized_prompt_from_all_answers
+    await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
     await current_user.session.commit()
     
     return {
@@ -1248,6 +1256,11 @@ async def delete_section_data_entry(
     await current_user.session.execute(
         delete(ProfileSectionData).where(ProfileSectionData.id == data_id)
     )
+    
+    # IMPORTANT: Update personalized prompt after deleting entry
+    from services.personalization_service import update_personalized_prompt_from_all_answers
+    await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
+    
     await current_user.session.commit()
     
     return {
