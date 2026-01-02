@@ -118,6 +118,10 @@ def init_profile_sections():
 
             for sid, name, icon, is_custom, user_id, order_idx in sections_data:
                 try:
+                    conn.execute(text("""
+                        INSERT INTO profile_sections (id, name, icon, is_custom, user_id, order_index)
+                        VALUES (:id, :name, :icon, :is_custom, :user_id, :order_index)
+                        ON CONFLICT (id) DO NOTHING
                     """), {
                         "id": sid,
                         "name": name,
@@ -133,6 +137,10 @@ def init_profile_sections():
             if "profile_questions" in inspector.get_table_names():
                 for qid, sid, qtext, order_idx, is_opt in questions_data:
                     try:
+                        conn.execute(text("""
+                            INSERT INTO profile_questions (id, section_id, question_text, order_index, is_optional)
+                            VALUES (:id, :section_id, :question_text, :order_index, :is_optional)
+                            ON CONFLICT (id) DO NOTHING
                         """), {
                             "id": qid,
                             "section_id": sid,

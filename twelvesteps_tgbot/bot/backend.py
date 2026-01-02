@@ -697,7 +697,6 @@ async def process_step_message(
     first_name: Optional[str] = None,
     skip_validation: bool = False
 ) -> Dict[str, Any]:
-    """
     token = await get_or_fetch_token(telegram_id, username, first_name)
     if not token:
         return None
@@ -719,7 +718,6 @@ async def get_current_step_question(
     username: Optional[str] = None,
     first_name: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
-    """
     token = await get_or_fetch_token(telegram_id, username, first_name)
     if not token:
         return None

@@ -19,7 +19,6 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def get_sync_url() -> str:
-    """
     database_url = os.getenv("DATABASE_URL")
 
     if database_url:
@@ -30,7 +29,6 @@ def get_sync_url() -> str:
 
 
 def run_migrations_offline() -> None:
-    """
     context.configure(
         url=get_sync_url(),
         target_metadata=target_metadata,
@@ -43,7 +41,6 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

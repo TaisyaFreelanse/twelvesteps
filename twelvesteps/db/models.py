@@ -252,7 +252,6 @@ class SessionContext(Base):
 
 
 class SessionState(Base):
-    """
     __tablename__ = "session_states"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, index=True)
@@ -285,7 +284,6 @@ class SessionState(Base):
 
 
 class FrameTracking(Base):
-    """
     __tablename__ = "frame_tracking"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, index=True)
@@ -318,7 +316,6 @@ class FrameTracking(Base):
 
 
 class QAStatus(Base):
-    """
     __tablename__ = "qa_status"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, index=True)
@@ -348,7 +345,6 @@ class QAStatus(Base):
 
 
 class UserMeta(Base):
-    """
     __tablename__ = "user_meta"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, index=True)
@@ -381,7 +377,6 @@ class UserMeta(Base):
 
 
 class TrackerSummary(Base):
-    """
     __tablename__ = "tracker_summaries"
 
     table_args = (
@@ -568,7 +563,6 @@ class TemplateProgressStatus(Enum):
 
 
 class TemplateProgress(Base):
-    """
     __tablename__ = "template_progress"
 
     __table_args__ = (
@@ -614,7 +608,6 @@ class Step10AnalysisStatus(Enum):
 
 
 class Step10DailyAnalysis(Base):
-    """
     __tablename__ = "step10_daily_analysis"
 
     __table_args__ = (

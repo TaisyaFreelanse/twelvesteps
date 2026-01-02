@@ -146,7 +146,6 @@ async def auth_telegram_endpoint(
     payload: TelegramAuthRequest,
     session: AsyncSession = Depends(get_db)
 ) -> TelegramAuthResponse:
-    """
     try:
         service = UserService(session)
         user, is_new = await service.authenticate_telegram(
@@ -175,7 +174,6 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
 
 @app.post("/thanks", response_model=ChatResponse)
 async def thanks_endpoint(payload: ChatRequest) -> ChatResponse:
-    """
     try:
         reply = await handle_thanks(payload.telegram_id, payload.debug)
         return reply
@@ -185,7 +183,6 @@ async def thanks_endpoint(payload: ChatRequest) -> ChatResponse:
 
 @app.post("/day", response_model=ChatResponse)
 async def day_endpoint(payload: ChatRequest) -> ChatResponse:
-    """
     try:
         reply = await handle_day(payload.telegram_id, payload.debug)
         return reply
@@ -196,7 +193,6 @@ async def day_endpoint(payload: ChatRequest) -> ChatResponse:
 
 @app.post("/sos", response_model=SosResponse)
 async def sos_endpoint(payload: SosRequest) -> SosResponse:
-    """
     try:
         reply_text = await handle_sos(payload.telegram_id)
         return SosResponse(reply=reply_text)
@@ -211,7 +207,6 @@ async def sos_chat_endpoint(
     payload: SosChatRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> SosChatResponse:
-    """
     try:
         service = SosService(current_context.session)
         result = await service.chat(
@@ -282,7 +277,6 @@ async def get_status(current_user: CurrentUserContext = Depends(get_current_user
 async def get_next_step_question(
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
-    """
     service = StepFlowService(current_context.session)
 
     question_text = await service.get_next_question_for_user(current_context.user.id)
@@ -472,7 +466,6 @@ async def submit_answer(
     answer_data: AnswerRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
-    """
     service = StepFlowService(current_context.session)
 
     success, error_message = await service.save_user_answer(
@@ -932,7 +925,6 @@ async def submit_general_free_text(
     free_text_data: FreeTextRequest,
     current_user: CurrentUserContext = Depends(get_current_user)
 ):
-    """
     if free_text_data.section_id is not None:
         raise HTTPException(
             status_code=400,
