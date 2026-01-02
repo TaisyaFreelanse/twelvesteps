@@ -1,5 +1,0 @@
-# разрешаем всё
-!.env
-!.env.example
-!.backend.env
-!.telegram.env
