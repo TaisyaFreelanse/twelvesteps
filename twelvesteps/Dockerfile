@@ -21,14 +21,13 @@ EXPOSE 8000
 # Create entrypoint script for migrations and server start
 RUN echo '#!/bin/sh\n\
 set -e\n\
-echo "Waiting for database to be ready..."\n\
-until pg_isready -h postgres -p 5432 -U postgres; do\n\
-  echo "Database is unavailable - sleeping"\n\
-  sleep 1\n\
-done\n\
-echo "Database is ready!"\n\
+echo "Checking DATABASE_URL..."\n\
+if [ -z "$DATABASE_URL" ]; then\n\
+  echo "Error: DATABASE_URL environment variable is not set"\n\
+  exit 1\n\
+fi\n\
+echo "DATABASE_URL is set (host: $(echo $DATABASE_URL | sed -n "s/.*@\\([^:]*\\).*/\\1/p"))"\n\
 echo "Applying migrations..."\n\
-export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://postgres:password@postgres:5432/twelvesteps}"\n\
 python apply_migrations_smart.py\n\
 if [ $? -ne 0 ]; then\n\
   echo "Migration failed!"\n\
@@ -36,7 +35,7 @@ if [ $? -ne 0 ]; then\n\
 fi\n\
 echo "Migrations applied successfully!"\n\
 echo "Starting API server..."\n\
-exec python -m uvicorn api.main:app --host 0.0.0.0 --port 8000\n\
+exec python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}\n\
 ' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 CMD ["/app/entrypoint.sh"]
