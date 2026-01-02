@@ -203,7 +203,6 @@ def register_handlers(dp: Dispatcher) -> None:
 
 
 async def handle_steps(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -342,7 +341,6 @@ async def handle_steps(message: Message, state: FSMContext) -> None:
 
 
 async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -547,7 +545,6 @@ async def handle_step_answer_mode(message: Message, state: FSMContext) -> None:
 
 
 async def handle_step_answer(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -615,7 +612,6 @@ async def handle_step_answer(message: Message, state: FSMContext) -> None:
 
 
 async def handle_exit(message: Message, state: FSMContext) -> None:
-    """
     current_state = await state.get_state()
 
     await state.clear()
@@ -632,7 +628,6 @@ async def handle_exit(message: Message, state: FSMContext) -> None:
 
 
 async def handle_reset(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     key = str(telegram_id)
     username = message.from_user.username
@@ -1330,7 +1325,6 @@ async def handle_sos_custom_input(message: Message, state: FSMContext) -> None:
 
 
 async def handle_thanks(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
 
     try:
@@ -1710,7 +1704,6 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
 
 
 async def find_first_unanswered_question(token: str, start_from_section_id: Optional[int] = None) -> Optional[dict]:
-    """
     sections_data = await BACKEND_CLIENT.get_profile_sections(token)
     sections = sections_data.get("sections", []) if sections_data else []
 
