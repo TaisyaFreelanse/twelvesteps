@@ -4,3 +4,4 @@ telegram.env
 syda/
 docs/
 .cursorignore
+!plan.md

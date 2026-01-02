@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
@@ -27,7 +27,6 @@ PROGRAM_EXPERIENCE_OPTIONS: List[str] = ["Новичок", "Есть немно�
 
 
 def build_main_menu_markup() -> ReplyKeyboardMarkup:
-    """
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🪜 Работа по шагу"), KeyboardButton(text="📖 Самоанализ")],
@@ -80,7 +79,6 @@ def build_error_markup() -> ReplyKeyboardMarkup:
 
 
 def build_profile_sections_markup(sections: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
-    """
     buttons = []
     row = []
 
@@ -364,7 +362,6 @@ def format_step_progress_indicator(
     answered_questions: Optional[int] = None,
     total_questions: Optional[int] = None
 ) -> str:
-    """
     from typing import Optional
 
     indicator_parts = []
