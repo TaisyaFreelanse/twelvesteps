@@ -293,7 +293,14 @@ async def update_profile(
         from services.personalization_service import update_personalized_prompt_from_all_answers
         # Use the updated user object instead of current_user.user to avoid greenlet issues
         await update_personalized_prompt_from_all_answers(current_user.session, user.id)
-        await current_user.session.commit()
+    
+    # Flush to ensure updated_at is set by the database
+    await current_user.session.flush()
+    
+    # Refresh to load updated_at from database before commit
+    await current_user.session.refresh(user)
+    
+    await current_user.session.commit()
     
     return build_user_schema(user)
 
