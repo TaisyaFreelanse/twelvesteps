@@ -19,7 +19,15 @@ def upgrade() -> None:
     if table_exists.fetchone():
         return
 
-    """)
+    op.create_table(
+        'gratitudes',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('user_id', sa.Integer(), nullable=False),
+        sa.Column('text', sa.Text(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
 
     op.execute("CREATE INDEX IF NOT EXISTS ix_gratitudes_user_id ON gratitudes (user_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_gratitudes_created_at ON gratitudes (created_at)")
