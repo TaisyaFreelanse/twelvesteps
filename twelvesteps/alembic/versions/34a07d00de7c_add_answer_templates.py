@@ -16,6 +16,8 @@ def upgrade() -> None:
     from sqlalchemy import inspect, text
 
     conn = op.get_bind()
+    result = conn.execute(text("""
+        SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'template_type_enum')
     """))
     enum_exists = result.scalar()
 
