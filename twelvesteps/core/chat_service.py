@@ -522,7 +522,6 @@ async def process_profile_free_text(
     free_text: str,
     debug: bool = False
 ) -> Dict[str, Any]:
-    """
     async with async_session_factory() as session:
         user_repo = UserRepository(session)
         from sqlalchemy import select
@@ -556,8 +555,6 @@ async def process_profile_free_text(
 
         section_names = [f"{s.name} (id: {s.id})" for s in sections]
         sections_text = "\n".join(section_names)
-
-"""
 
         import json
         from openai import AsyncOpenAI

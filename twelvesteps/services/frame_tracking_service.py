@@ -37,7 +37,7 @@ class FrameTrackingService:
         frame_content: str,
         frame_data: Optional[Dict[str, Any]] = None
     ) -> FrameTracking:
-        """
+        """Add a candidate frame to tracking."""
         tracking = await self.get_or_create_tracking(user_id)
 
         if not tracking.candidates:

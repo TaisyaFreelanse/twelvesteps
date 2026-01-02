@@ -134,9 +134,7 @@ class OpenAI(Provider):
 
         system_prompt = await PromptRepository.load_update_prompt()
 
-        """
-
-        messages = self._format_profile_task(system_prompt, user_input_block)
+        messages = self._format_profile_task(system_prompt, new_info)
 
         async with AsyncOpenAI() as client:
             response = await client.chat.completions.create(

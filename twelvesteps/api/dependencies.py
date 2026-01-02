@@ -47,7 +47,6 @@ async def get_current_user(
     x_telegram_id: str = Header(..., alias="X-Telegram-ID"),
     session: AsyncSession = Depends(get_db)
 ) -> User:
-    """
     stmt = select(User).where(User.telegram_id == x_telegram_id)
     result = await session.execute(stmt)
     user = result.scalars().first()

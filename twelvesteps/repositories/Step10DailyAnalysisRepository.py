@@ -89,7 +89,7 @@ class Step10DailyAnalysisRepository:
     async def save_answer(
         self, analysis: Step10DailyAnalysis, question_number: int, answer: str
     ) -> dict:
-        """
+        """Save an answer and move to the next question."""
         answers = analysis.answers or []
 
         answer_found = False

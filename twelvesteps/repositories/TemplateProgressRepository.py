@@ -94,7 +94,7 @@ class TemplateProgressRepository:
     async def save_field_value(
         self, progress: TemplateProgress, field_key: str, value: str
     ) -> dict:
-        """
+        """Save a field value and determine the next field to fill."""
         situations = progress.situations or []
         current_sit_idx = progress.current_situation - 1
 

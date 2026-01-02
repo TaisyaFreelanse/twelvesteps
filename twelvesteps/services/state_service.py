@@ -132,7 +132,7 @@ class StateService:
         text: str,
         tags: Optional[List[str]] = None
     ) -> SessionState:
-        """
+        """Add a recent message to the user's session state."""
         state = await self.get_or_create_state(user_id)
 
         if not state.recent_messages:

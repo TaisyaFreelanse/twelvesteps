@@ -304,8 +304,6 @@ class StepFlowService:
         return question.text
 
     async def get_next_question_for_user(self, user_id: int) -> Union[str, None]:
-        """
-
         stmt_tail = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -361,7 +359,6 @@ class StepFlowService:
         return next_question.text
 
     def validate_answer_length(self, answer_text: str, is_template_format: bool = False) -> tuple[bool, str]:
-        """
         if is_template_format:
             try:
                 template_data = json.loads(answer_text)
@@ -390,7 +387,6 @@ class StepFlowService:
         return True, ""
 
     async def save_user_answer(self, user_id: int, answer_text: str, is_template_format: bool = False, skip_validation: bool = False) -> tuple[bool, str]:
-        """
         stmt = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -455,7 +451,6 @@ class StepFlowService:
 
 
     async def _initialize_next_step(self, user_id: int) -> Optional[UserStep]:
-        """
         stmt_last = select(Step).join(UserStep).where(
             UserStep.user_id == user_id,
             UserStep.status == StepProgressStatus.COMPLETED
@@ -484,7 +479,6 @@ class StepFlowService:
         return new_user_step
 
     async def _find_next_unanswered_question(self, user_id: int, step_id: int) -> Optional[Question]:
-        """
         stmt_questions = select(Question).where(
             Question.step_id == step_id
         ).order_by(Question.id)

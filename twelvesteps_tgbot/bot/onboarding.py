@@ -133,7 +133,6 @@ async def handle_sobriety(message: Message, state: FSMContext) -> None:
 
 
 async def handle_self_description(message: Message, state: FSMContext) -> None:
-    """
     text = message.text.strip()
 
     if is_question(text):

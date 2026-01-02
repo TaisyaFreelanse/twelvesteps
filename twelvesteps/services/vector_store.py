@@ -57,7 +57,7 @@ class VectorStoreService:
         embedding: Optional[List[float]] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """
+        """Update a frame embedding in the vector store."""
         existing = self.frames_collection.get(ids=[str(frame_id)])
 
         if not existing["ids"]:
@@ -93,7 +93,7 @@ class VectorStoreService:
         user_id: int,
         limit: int = 5
     ) -> Dict[str, Any]:
-        """
+        """Search for similar frames in the vector store."""
         try:
             results = self.frames_collection.query(
                 query_embeddings=[query_embedding],
@@ -110,7 +110,7 @@ class VectorStoreService:
         limit: int = 5,
         filter_tags: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """
+        """Search for similar chunks in the core collection."""
         try:
             where_filter = None
             if filter_tags:
@@ -140,7 +140,7 @@ class VectorStoreService:
         embedding: List[float],
         metadata: Dict[str, Any]
     ) -> None:
-        """
+        """Add a chunk to the GPT-SELF core collection."""
         self.core_collection.add(
             embeddings=[embedding],
             documents=[content],

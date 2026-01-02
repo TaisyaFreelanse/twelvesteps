@@ -24,7 +24,7 @@ class StatusService:
         self.session = session
 
     async def get_status_for_user(self, user: UserModel) -> dict[str, Any]:
-        """
+        """Get the status for a specific user."""
         user_id = user.id
 
         stmt_user_step = select(UserStep).where(

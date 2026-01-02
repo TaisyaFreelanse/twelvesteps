@@ -49,7 +49,6 @@ class ProfileService:
     async def save_answer(
         self, user_id: int, question_id: int, answer_text: str
     ) -> Tuple[ProfileAnswer, Optional[ProfileQuestion]]:
-        """
         answer = await self.repo.save_answer(user_id, question_id, answer_text)
 
         await self.session.flush()
@@ -241,7 +240,6 @@ class ProfileService:
         unanswered_questions: List[ProfileQuestion],
         last_answer: str
     ) -> ProfileQuestion:
-        """
         llm = OpenAI()
 
         questions_text = "\n".join([
@@ -249,9 +247,9 @@ class ProfileService:
             for i, q in enumerate(unanswered_questions)
         ])
 
-Верни только номер вопроса (1, 2, 3 и т.д.) без дополнительного текста."""
+        system_prompt = "Ты помогаешь выбрать следующий вопрос для профиля. Верни только номер вопроса (1, 2, 3 и т.д.) без дополнительного текста."
 
-Какой вопрос задать следующим? Верни только номер."""
+        user_prompt = f"Последний ответ пользователя: {last_answer}\n\nСписок вопросов:\n{questions_text}\n\nКакой вопрос задать следующим? Верни только номер."
 
         try:
             messages = [
@@ -359,7 +357,7 @@ class ProfileService:
     async def get_fsm_state(
         self, user_id: int, section_id: int
     ) -> dict:
-        """
+        """Get FSM state for a section."""
         section = await self.repo.get_section_by_id(section_id)
         if not section:
             return {

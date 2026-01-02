@@ -111,7 +111,7 @@ class TrackerService:
         start_date: date,
         end_date: date
     ) -> List[TrackerSummary]:
-        """
+        """Get summaries for a specific period."""
         return await self.repo.get_summaries_for_period(user_id, start_date, end_date)
 
     async def get_last_week_summaries(self, user_id: int) -> List[TrackerSummary]:
@@ -126,7 +126,7 @@ class TrackerService:
         start_date: date,
         end_date: date
     ) -> Dict[str, List[str]]:
-        """
+        """Aggregate tracker data by category for a period."""
         summaries = await self.repo.get_summaries_for_period(user_id, start_date, end_date)
 
         result: Dict[str, List[str]] = {
@@ -151,7 +151,7 @@ class TrackerService:
         user_id: int,
         days: int = 7
     ) -> Dict[str, Any]:
-        """
+        """Get trend data for a user over a period of days."""
         end = date.today()
         start = end - timedelta(days=days)
         summaries = await self.repo.get_summaries_for_period(user_id, start, end)

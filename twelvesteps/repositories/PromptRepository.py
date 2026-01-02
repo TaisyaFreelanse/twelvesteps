@@ -148,7 +148,6 @@ class PromptRepository:
 
     @staticmethod
     async def load_profile_next_question_prompt():
-        """
         try:
             async with aiofiles.open("./llm/prompts/profile_next_question.json", "r", encoding="utf-8") as f:
                 content = await f.read()

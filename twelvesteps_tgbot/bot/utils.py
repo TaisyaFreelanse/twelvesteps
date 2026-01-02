@@ -61,7 +61,6 @@ async def send_long_message(
     reply_markup: Optional[Union[ReplyKeyboardMarkup, InlineKeyboardMarkup]] = None,
     max_length: int = 4096
 ) -> None:
-    """
     chunks = split_long_message(text, max_length)
 
     for i, chunk in enumerate(chunks):
@@ -77,7 +76,6 @@ async def edit_long_message(
     reply_markup: Optional[InlineKeyboardMarkup] = None,
     max_length: int = 4096
 ) -> None:
-    """
     import logging
     from aiogram.exceptions import TelegramBadRequest
 

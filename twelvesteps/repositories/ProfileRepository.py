@@ -127,7 +127,6 @@ class ProfileRepository:
         is_core_personality: bool = False,
         tags: Optional[str] = None
     ) -> ProfileSectionData:
-        """
         data = ProfileSectionData(
             user_id=user_id,
             section_id=section_id,
