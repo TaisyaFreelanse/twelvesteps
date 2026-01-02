@@ -399,14 +399,12 @@ class BackendClient:
                 return await response.json()
 
     async def get_sos_message(self, telegram_id: int | str) -> str:
-        """
         payload = {"telegram_id": str(telegram_id)}
         data = await self._request("POST", "/sos", json=payload)
         return data["reply"]
 
 
     async def thanks(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
-        """
         payload = {"telegram_id": str(telegram_id), "debug": debug}
         data = await self._request("POST", "/thanks", json=payload)
 
@@ -422,7 +420,6 @@ class BackendClient:
         return ChatResponse(reply=reply, log=log)
 
     async def day(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
-        """
         payload = {"telegram_id": str(telegram_id), "debug": debug}
         data = await self._request("POST", "/day", json=payload)
 

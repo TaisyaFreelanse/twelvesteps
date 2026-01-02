@@ -13,11 +13,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     conn = op.get_bind()
+    result = conn.execute(sa.text("""
+        SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'session_type_enum')
     """))
     enum_exists = result.scalar()
 
     if not enum_exists:
-        """)
+        op.execute("CREATE TYPE session_type_enum AS ENUM ('STEPS', 'DAY', 'CHAT')")
 
     inspector = sa.inspect(conn)
     existing_tables = inspector.get_table_names()
