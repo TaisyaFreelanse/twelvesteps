@@ -1036,8 +1036,6 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                                 break
 
                     if step_number and step_question:
-⚠️ Не перегружай примеры деталями."""
-
                         await state.set_state(SosStates.chatting)
                         await state.update_data(help_type=help_type, conversation_history=[])
 
