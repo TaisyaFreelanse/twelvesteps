@@ -3,4 +3,4 @@ backend.env
 telegram.env
 syda/
 docs/
-.cursorignore
+!.cursorignore
