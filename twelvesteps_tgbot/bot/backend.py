@@ -78,7 +78,6 @@ class BackendClient:
 
 
     async def get_next_step(self, access_token: str) -> Dict[str, Any]:
-        """
         return await self._request("GET", "/steps/next", token=access_token)
 
     async def submit_step_answer(
@@ -88,7 +87,6 @@ class BackendClient:
         is_template_format: bool = False,
         skip_validation: bool = False
     ) -> Tuple[bool, Optional[str]]:
-        """
         url = f"{self.base_url}/steps/answer"
         headers = {"Authorization": f"Bearer {access_token}"}
         payload = {
@@ -556,7 +554,6 @@ class BackendClient:
     async def submit_template_field(
         self, token: str, step_id: int, question_id: int, value: str
     ) -> Optional[Dict[str, Any]]:
-        """
         try:
             data = await self._request(
                 "POST",
@@ -572,7 +569,6 @@ class BackendClient:
     async def pause_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
         try:
             data = await self._request(
                 "POST",
@@ -744,7 +740,6 @@ class ChatResponse(BaseModel):
 
 
 async def call_legacy_chat(telegram_id: int, text: str, debug: bool) -> Union[str, ChatResponse]:
-    """
     payload = {"telegram_id": str(telegram_id), "message": text, "debug": debug}
     timeout = aiohttp.ClientTimeout(total=120)
 
