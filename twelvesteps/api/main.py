@@ -106,6 +106,17 @@ load_dotenv(env_path)
 
 app = FastAPI(title="12STEPS Chat API")
 
+# Health check endpoint for Render (must be first to avoid conflicts)
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render and monitoring"""
+    return {"status": "ok", "service": "twelvesteps-backend"}
+
+@app.get("/")
+async def root():
+    """Root endpoint for basic health check"""
+    return {"status": "ok", "service": "twelvesteps-backend", "message": "API is running"}
+
 # Initialize profile sections on startup if they don't exist
 @app.on_event("startup")
 async def startup_event():
