@@ -731,7 +731,6 @@ async def handle_about_step(message: Message, state: FSMContext) -> None:
 
 
 async def qa_open(message: Message) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -799,7 +798,6 @@ async def qa_report(message: Message):
 
 
 async def handle_message(message: Message, debug: bool) -> None:
-    """
     telegram_id = message.from_user.id
 
     try:
@@ -898,7 +896,6 @@ async def send_welcome_back(message: Message, user: dict, status: dict) -> None:
 
 
 async def handle_sos(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
 
     current_state = await state.get_state()
@@ -914,7 +911,6 @@ async def handle_sos(message: Message, state: FSMContext) -> None:
 
 
 async def safe_answer_callback(callback: CallbackQuery, text: str | None = None, show_alert: bool = False) -> bool:
-    """
     try:
         await callback.answer(text=text, show_alert=show_alert)
         return True
@@ -2457,7 +2453,6 @@ async def handle_progress_callback(callback: CallbackQuery, state: FSMContext) -
 
 
 async def handle_day(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -4719,7 +4714,6 @@ async def handle_question_view_callback(callback: CallbackQuery, state: FSMConte
 
 
 async def handle_template_field_input(message: Message, state: FSMContext) -> None:
-    """
     telegram_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
