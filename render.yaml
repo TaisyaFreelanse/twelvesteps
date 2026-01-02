@@ -1,0 +1,57 @@
+services:
+  # PostgreSQL Database
+  - type: pspg
+    name: twelvesteps-db
+    plan: free
+    region: frankfurt
+    databaseName: twelvesteps_db
+    user: twelvesteps_db_user
+
+  # Backend API Service
+  - type: web
+    name: twelvesteps-backend
+    env: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./twelvesteps/Dockerfile
+    dockerContext: ./twelvesteps
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: twelvesteps-db
+          property: connectionString
+          transform: "postgresql+asyncpg://${value}"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: PORT
+        value: 8000
+
+  # Telegram Bot Service
+  - type: worker
+    name: twelvesteps-bot
+    env: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./twelvesteps_tgbot/Dockerfile
+    dockerContext: ./twelvesteps_tgbot
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: BACKEND_API_BASE_URL
+        fromService:
+          name: twelvesteps-backend
+          type: web
+          property: host
+          transform: "https://${value}"
+      - key: BACKEND_URL
+        fromService:
+          name: twelvesteps-backend
+          type: web
+          property: host
+          transform: "https://${value}"
+      - key: PORT
+        value: 10000
+
