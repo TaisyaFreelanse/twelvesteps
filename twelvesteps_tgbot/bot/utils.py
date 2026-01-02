@@ -5,7 +5,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, ReplyKey
 
 
 def split_long_message(text: str, max_length: int = 4096) -> List[str]:
-    """
+    """Split a long message into chunks that fit Telegram's message limit."""
     if len(text) <= max_length:
         return [text]
 
@@ -139,7 +139,7 @@ async def edit_long_message(
 
 
 def is_question(text: str) -> bool:
-    """
+    """Check if the text is a question."""
     if not text or not text.strip():
         return False
 

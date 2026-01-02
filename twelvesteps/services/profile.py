@@ -129,7 +129,7 @@ class ProfileService:
         return await self.repo.get_section_summary(user_id, section_id)
 
     def split_long_message(self, text: str, max_length: int = 4096) -> List[str]:
-        """
+        """Split long message into chunks."""
         if len(text) <= max_length:
             return [text]
 
@@ -181,7 +181,7 @@ class ProfileService:
     async def get_next_question_for_section(
         self, user_id: int, section_id: int, last_answer: Optional[str] = None
     ) -> Optional[ProfileQuestion]:
-        """
+        """Get the next unanswered question for a section."""
         section = await self.repo.get_section_by_id(section_id)
         if not section:
             return None
@@ -290,7 +290,7 @@ class ProfileService:
         section: ProfileSection,
         last_answer: str
     ) -> Optional[ProfileQuestion]:
-        """
+        """Generate a follow-up question based on the last answer."""
         from repositories.PromptRepository import PromptRepository
         from db.models import ProfileQuestion
 
@@ -316,6 +316,14 @@ class ProfileService:
 
 
         prompt = prompt_template.replace("[НАЗВАНИЕ_БЛОКА]", section.name)
+        full_prompt = f"""{prompt}
+
+Предыдущие ответы пользователя:
+{answers_text}
+
+Последний ответ: {last_answer}
+
+Персонализация: {personalized_prompt}
 
 Сформулируй уточняющий вопрос (или верни пустую строку, если не нужен)."""
 
