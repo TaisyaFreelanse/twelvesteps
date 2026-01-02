@@ -25,7 +25,21 @@ def upgrade() -> None:
     if table_exists.fetchone():
         return
 
-    """)
+    op.create_table(
+        'step10_daily_analysis',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('user_id', sa.Integer(), nullable=False),
+        sa.Column('analysis_date', sa.Date(), nullable=False),
+        sa.Column('status', sa.Enum('IN_PROGRESS', 'PAUSED', 'COMPLETED', name='step10_analysis_status_enum'), nullable=False, server_default='IN_PROGRESS'),
+        sa.Column('current_question', sa.Integer(), nullable=False, server_default='1'),
+        sa.Column('answers', sa.JSON(), nullable=True),
+        sa.Column('summary', sa.Text(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('user_id', 'analysis_date', name='uq_step10_user_date')
+    )
 
     op.execute("CREATE INDEX IF NOT EXISTS ix_step10_daily_analysis_user_id ON step10_daily_analysis (user_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_step10_daily_analysis_date ON step10_daily_analysis (analysis_date)")
