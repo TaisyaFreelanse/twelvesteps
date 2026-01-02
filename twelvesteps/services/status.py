@@ -25,61 +25,52 @@ class StatusService:
 
     async def get_status_for_user(self, user: UserModel) -> dict[str, Any]:
         """
-        Get comprehensive status for user including:
-        - Current step number and status
-        - Open step question (if any)
-        - All open tails
-        """
         user_id = user.id
-        
-        # 1. Find current step in progress
+
         stmt_user_step = select(UserStep).where(
             UserStep.user_id == user_id,
             UserStep.status == StepProgressStatus.IN_PROGRESS
         )
         result_user_step = await self.session.execute(stmt_user_step)
         current_user_step = result_user_step.scalars().first()
-        
+
         current_step = None
         current_step_status = DEFAULT_STEP_STATUS
-        
+
         if current_user_step:
-            # Get step number
             stmt_step = select(Step).where(Step.id == current_user_step.step_id)
             result_step = await self.session.execute(stmt_step)
             step = result_step.scalars().first()
-            
+
             if step:
                 current_step = step.index
                 current_step_status = current_user_step.status.value
-        
-        # 2. Find open step question (Tail with STEP_QUESTION type and is_closed=False)
+
         open_step_question = None
-        
+
         stmt_open_tail = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
             Tail.is_closed == False
         ).options(selectinload(Tail.question), selectinload(Tail.step))
-        
+
         result_open_tail = await self.session.execute(stmt_open_tail)
         open_tail = result_open_tail.scalars().first()
-        
+
         if open_tail and open_tail.step_question_id and open_tail.step_id:
             open_step_question = {
                 "step_id": open_tail.step_id,
                 "question_id": open_tail.step_question_id
             }
-        
-        # 3. Get all open tails (not just step questions)
+
         stmt_all_tails = select(Tail).where(
             Tail.user_id == user_id,
             Tail.is_closed == False
         ).order_by(Tail.created_at.desc())
-        
+
         result_all_tails = await self.session.execute(stmt_all_tails)
         all_tails = result_all_tails.scalars().all()
-        
+
         tails = []
         for tail in all_tails:
             tails.append({
@@ -87,7 +78,7 @@ class StatusService:
                 "type": tail.tail_type.value,
                 "payload": tail.payload
             })
-        
+
         return {
             "current_step": current_step,
             "current_step_status": current_step_status,

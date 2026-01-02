@@ -17,14 +17,14 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     log : Optional[Log]
-    
+
 class Log(BaseModel):
     classification_result: str
     blocks_used: str
     plan : str
     prompt_changes : Optional[str]
 
-    
+
 
 class TelegramAuthRequest(BaseModel):
     telegram_id: str = Field(..., min_length=1)
@@ -42,10 +42,10 @@ class UserSchema(BaseModel):
     program_experience: Optional[str] = None
     sobriety_date: Optional[date] = None
     personal_prompt: Optional[str] = None
-    relapse_dates: Optional[List[str]] = None  # JSON массив дат в формате YYYY-MM-DD
-    sponsor_ids: Optional[List[int]] = None  # JSON массив ID спонсоров
-    custom_fields: Optional[Dict[str, Any]] = None  # JSON для целей, важных людей, формата поддержки
-    last_active: Optional[datetime] = None  # Обновляется при каждом взаимодействии
+    relapse_dates: Optional[List[str]] = None
+    sponsor_ids: Optional[List[int]] = None
+    custom_fields: Optional[Dict[str, Any]] = None
+    last_active: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -62,7 +62,6 @@ class ProfileUpdateRequest(BaseModel):
     sobriety_date: Optional[date] = Field(default=None)
 
 class SosRequest(BaseModel):
-    # Accepts integer or string to match your handle_chat signature
     telegram_id: int | str
 
 class SosResponse(BaseModel):
@@ -79,7 +78,7 @@ class SosChatResponse(BaseModel):
     """Response from SOS chat dialog"""
     reply: str
     is_finished: bool = Field(default=False, description="Whether the conversation is finished and should ask about saving draft")
-    conversation_history: List[Dict[str, str]] = Field(default_factory=list, description="Updated conversation history")    
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list, description="Updated conversation history")
 
 class OpenStepQuestion(BaseModel):
     step_id: int
@@ -183,7 +182,6 @@ def build_user_schema(user: UserModel) -> UserSchema:
     )
 
 
-# --- PROFILE SCHEMAS ---
 
 class ProfileQuestionSchema(BaseModel):
     id: int
@@ -261,7 +259,7 @@ class ProfileSectionSchema(BaseModel):
 
 class ProfileSectionDetailSchema(ProfileSectionSchema):
     questions: list[ProfileQuestionSchema] = Field(default_factory=list)
-    has_data: bool = False  # Есть ли данные у пользователя для этого раздела
+    has_data: bool = False
 
     class Config:
         from_attributes = True
@@ -276,12 +274,12 @@ class ProfileSectionDetailResponse(BaseModel):
 
 
 class ProfileAnswerRequest(BaseModel):
-    question_id: Optional[int] = None  # None for generated follow-up questions
+    question_id: Optional[int] = None
     answer_text: str = Field(..., min_length=1)
 
 
 class FreeTextRequest(BaseModel):
-    section_id: Optional[int] = None  # Если None - общий свободный рассказ
+    section_id: Optional[int] = None
     text: str = Field(..., min_length=1)
 
 
@@ -304,14 +302,13 @@ class SectionSummaryResponse(BaseModel):
     last_updated: Optional[datetime] = None
 
 
-# --- ANSWER TEMPLATE SCHEMAS ---
 
 class AnswerTemplateSchema(BaseModel):
     id: int
     user_id: Optional[int] = None
     name: str
-    template_type: str  # "AUTHOR" or "CUSTOM"
-    structure: dict  # JSON structure
+    template_type: str
+    structure: dict
     created_at: datetime
     updated_at: datetime
 
@@ -349,10 +346,9 @@ class AnswerTemplateUpdateRequest(BaseModel):
 
 
 class ActiveTemplateRequest(BaseModel):
-    template_id: Optional[int] = None  # None to reset to default
+    template_id: Optional[int] = None
 
 
-# --- Template Progress Schemas (FSM для пошагового заполнения) ---
 
 class TemplateProgressStartRequest(BaseModel):
     """Запрос на начало/продолжение заполнения шаблона"""
@@ -374,7 +370,7 @@ class TemplateFieldInfo(BaseModel):
 class TemplateProgressResponse(BaseModel):
     """Ответ с информацией о прогрессе шаблона"""
     progress_id: Optional[int] = None
-    status: str  # IN_PROGRESS, PAUSED, COMPLETED, CANCELLED
+    status: str
     current_field: Optional[str] = None
     current_situation: Optional[int] = None
     field_info: Optional[TemplateFieldInfo] = None
@@ -405,7 +401,7 @@ class TemplateFieldSubmitResponse(BaseModel):
     ready_for_conclusion: bool = False
     is_complete: bool = False
     progress_summary: Optional[str] = None
-    formatted_answer: Optional[str] = None  # Только если is_complete
+    formatted_answer: Optional[str] = None
 
 
 class TemplatePauseRequest(BaseModel):
@@ -429,7 +425,6 @@ class TemplateFieldsInfoResponse(BaseModel):
     min_situations: int
 
 
-# --- STEP 10 DAILY ANALYSIS SCHEMAS ---
 
 class Step10QuestionData(BaseModel):
     """Данные вопроса для самоанализа"""
@@ -440,14 +435,14 @@ class Step10QuestionData(BaseModel):
 
 class Step10StartRequest(BaseModel):
     """Запрос на начало самоанализа"""
-    analysis_date: Optional[date] = None  # Если не указана, используется сегодняшняя дата
+    analysis_date: Optional[date] = None
 
 
 class Step10StartResponse(BaseModel):
     """Ответ при начале самоанализа"""
     analysis_id: int
-    status: str  # IN_PROGRESS, PAUSED, COMPLETED
-    current_question: int  # 1-10
+    status: str
+    current_question: int
     question_data: Step10QuestionData
     progress_summary: str
     is_resumed: bool
@@ -456,7 +451,7 @@ class Step10StartResponse(BaseModel):
 
 class Step10SubmitAnswerRequest(BaseModel):
     """Запрос на сохранение ответа"""
-    question_number: int  # 1-10
+    question_number: int
     answer: str
     analysis_date: Optional[date] = None
 
@@ -465,7 +460,7 @@ class Step10SubmitAnswerResponse(BaseModel):
     """Ответ при сохранении ответа"""
     success: bool
     error: Optional[str] = None
-    next_question: Optional[int] = None  # 1-10 или None если завершено
+    next_question: Optional[int] = None
     next_question_data: Optional[Step10QuestionData] = None
     is_complete: bool
     progress_summary: str
@@ -498,9 +493,7 @@ class Step10ProgressResponse(BaseModel):
     is_complete: bool
 
 
-# --- Extended Data Schemas ---
 
-# SessionState schemas
 class SessionStateResponse(BaseModel):
     id: int
     user_id: int
@@ -521,7 +514,6 @@ class SessionStateUpdateRequest(BaseModel):
     group_signals: Optional[List[str]] = None
 
 
-# FrameTracking schemas
 class FrameTrackingResponse(BaseModel):
     id: int
     user_id: int
@@ -542,7 +534,6 @@ class FrameTrackingUpdateRequest(BaseModel):
     meta_flags: Optional[List[str]] = None
 
 
-# QAStatus schemas
 class QAStatusResponse(BaseModel):
     id: int
     user_id: int
@@ -561,7 +552,6 @@ class QAStatusUpdateRequest(BaseModel):
     rebuild_required: Optional[bool] = None
 
 
-# TrackerSummary schemas
 class TrackerSummaryResponse(BaseModel):
     id: int
     user_id: int
@@ -581,10 +571,9 @@ class TrackerSummaryCreateRequest(BaseModel):
     behavior: Optional[List[str]] = None
     relationships: Optional[List[str]] = None
     health: Optional[List[str]] = None
-    date: Optional[date] = None  # Если не указана, используется сегодняшняя дата
+    date: Optional[date] = None
 
 
-# UserMeta schemas
 class UserMetaResponse(BaseModel):
     id: int
     user_id: int
@@ -605,7 +594,6 @@ class UserMetaUpdateRequest(BaseModel):
     data_flags: Optional[Dict[str, Any]] = None
 
 
-# --- Gratitude Schemas ---
 
 class GratitudeCreateRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)

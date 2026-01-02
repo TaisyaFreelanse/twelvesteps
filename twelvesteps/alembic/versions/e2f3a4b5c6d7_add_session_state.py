@@ -1,9 +1,3 @@
-"""add session state
-
-Revision ID: e2f3a4b5c6d7
-Revises: d1e2f3a4b5c6
-Create Date: 2025-01-27 15:00:00.000000
-
 """
 from typing import Sequence, Union
 
@@ -12,7 +6,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-# revision identifiers, used by Alembic.
 revision: str = 'e2f3a4b5c6d7'
 down_revision: Union[str, None] = 'd1e2f3a4b5c6'
 branch_labels: Union[str, Sequence[str], None] = None
@@ -22,22 +15,21 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create session_states table for operational state tracking."""
     from sqlalchemy import inspect
-    
-    # Check if table already exists
+
     conn = op.get_bind()
     inspector = inspect(conn)
     existing_tables = inspector.get_table_names()
-    
+
     if 'session_states' not in existing_tables:
         op.create_table(
             'session_states',
             sa.Column('id', sa.Integer(), nullable=False),
             sa.Column('user_id', sa.Integer(), nullable=False),
-            sa.Column('recent_messages', sa.JSON(), nullable=True),  # JSON массив с timestamp, text, tags
-            sa.Column('daily_snapshot', sa.JSON(), nullable=True),  # JSON: emotions, triggers, actions, health
-            sa.Column('active_blocks', sa.JSON(), nullable=True),  # JSON массив строк
-            sa.Column('pending_topics', sa.JSON(), nullable=True),  # JSON массив строк
-            sa.Column('group_signals', sa.JSON(), nullable=True),  # JSON массив строк
+            sa.Column('recent_messages', sa.JSON(), nullable=True),
+            sa.Column('daily_snapshot', sa.JSON(), nullable=True),
+            sa.Column('active_blocks', sa.JSON(), nullable=True),
+            sa.Column('pending_topics', sa.JSON(), nullable=True),
+            sa.Column('group_signals', sa.JSON(), nullable=True),
             sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
             sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
             sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),

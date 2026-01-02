@@ -8,13 +8,13 @@ from db.models import SessionState
 class SessionStateRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_user_id(self, user_id: int) -> Optional[SessionState]:
         """Get SessionState for a user"""
         stmt = select(SessionState).where(SessionState.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def create_or_update(
         self,
         user_id: int,
@@ -26,7 +26,7 @@ class SessionStateRepository:
     ) -> SessionState:
         """Create or update SessionState for a user"""
         existing = await self.get_by_user_id(user_id)
-        
+
         if existing:
             if recent_messages is not None:
                 existing.recent_messages = recent_messages

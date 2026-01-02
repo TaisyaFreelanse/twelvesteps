@@ -8,13 +8,13 @@ from db.models import QAStatus
 class QAStatusRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_user_id(self, user_id: int) -> Optional[QAStatus]:
         """Get QAStatus for a user"""
         stmt = select(QAStatus).where(QAStatus.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def create_or_update(
         self,
         user_id: int,
@@ -25,7 +25,7 @@ class QAStatusRepository:
     ) -> QAStatus:
         """Create or update QAStatus for a user"""
         existing = await self.get_by_user_id(user_id)
-        
+
         if existing:
             if last_prompt_included is not None:
                 existing.last_prompt_included = last_prompt_included

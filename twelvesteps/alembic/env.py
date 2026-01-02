@@ -7,57 +7,29 @@ from sqlalchemy import pool
 from alembic import context
 
 from db.database import Base
-from db import models  # noqa: F401  # ensure models are imported for Alembic
+from db import models
 
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
 def get_sync_url() -> str:
     """
-    Build a synchronous SQLAlchemy URL for Alembic.
-
-    The app uses an async DATABASE_URL (e.g. postgresql+asyncpg://).
-    Alembic needs a sync URL (e.g. postgresql+psycopg2://).
-    """
-    # Try to get DATABASE_URL from environment (for Docker)
     database_url = os.getenv("DATABASE_URL")
-    
+
     if database_url:
-        # Convert async URL to sync URL
-        # postgresql+asyncpg:// -> postgresql+psycopg2://
         sync_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
         return sync_url
-    
-    # Fallback to default (for local development)
-    # This matches the DATABASE_URL in backend.env: postgresql+asyncpg://postgres:password@localhost:5432/twelvesteps
-    # Converted to sync driver for Alembic: postgresql+psycopg2://
+
     return "postgresql+psycopg2://postgres:password@localhost:5432/twelvesteps"
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
     """
     context.configure(
         url=get_sync_url(),
@@ -71,11 +43,6 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
     """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),

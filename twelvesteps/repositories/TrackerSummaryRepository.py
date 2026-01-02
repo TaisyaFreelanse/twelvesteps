@@ -9,7 +9,7 @@ from db.models import TrackerSummary
 class TrackerSummaryRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_user_and_date(self, user_id: int, summary_date: date) -> Optional[TrackerSummary]:
         """Get TrackerSummary for a user by date"""
         stmt = select(TrackerSummary).where(
@@ -18,7 +18,7 @@ class TrackerSummaryRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def get_latest(self, user_id: int) -> Optional[TrackerSummary]:
         """Get latest TrackerSummary for a user"""
         stmt = (
@@ -29,23 +29,13 @@ class TrackerSummaryRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def get_summaries_for_period(
         self,
         user_id: int,
         start_date: date,
         end_date: date
     ) -> List[TrackerSummary]:
-        """
-        Get all TrackerSummary records for a user within a date range.
-        
-        Args:
-            user_id: User ID
-            start_date: Start date (inclusive)
-            end_date: End date (inclusive)
-            
-        Returns:
-            List of TrackerSummary records ordered by date ascending
         """
         stmt = (
             select(TrackerSummary)
@@ -60,21 +50,12 @@ class TrackerSummaryRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def get_last_n_summaries(
         self,
         user_id: int,
         limit: int = 7
     ) -> List[TrackerSummary]:
-        """
-        Get last N TrackerSummary records for a user.
-        
-        Args:
-            user_id: User ID
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of TrackerSummary records ordered by date descending
         """
         stmt = (
             select(TrackerSummary)
@@ -84,7 +65,7 @@ class TrackerSummaryRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
-    
+
     async def create_or_update(
         self,
         user_id: int,
@@ -99,9 +80,9 @@ class TrackerSummaryRepository:
         if summary_date is None:
             from datetime import date as date_class
             summary_date = date_class.today()
-        
+
         existing = await self.get_by_user_and_date(user_id, summary_date)
-        
+
         if existing:
             if thinking is not None:
                 existing.thinking = thinking

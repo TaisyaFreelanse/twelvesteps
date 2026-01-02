@@ -26,12 +26,10 @@ from api.schemas import (
     TelegramAuthRequest,
     TelegramAuthResponse,
     UserSchema,
-    # Add these two new schemas:
-    SosRequest, 
+    SosRequest,
     SosResponse,
     SosChatRequest,
     SosChatResponse,
-    # Profile schemas:
     ProfileSectionListResponse,
     ProfileSectionDetailResponse,
     ProfileSectionDetailSchema,
@@ -42,13 +40,11 @@ from api.schemas import (
     SectionSummaryResponse,
     ProfileSectionDataCreateRequest,
     ProfileSectionDataUpdateRequest,
-    # Template schemas:
     AnswerTemplateSchema,
     AnswerTemplateListResponse,
     AnswerTemplateCreateRequest,
     AnswerTemplateUpdateRequest,
     ActiveTemplateRequest,
-    # Template Progress schemas (FSM):
     TemplateProgressStartRequest,
     TemplateProgressResponse,
     TemplateFieldSubmitRequest,
@@ -57,7 +53,6 @@ from api.schemas import (
     TemplatePauseResponse,
     TemplateFieldsInfoResponse,
     TemplateFieldInfo,
-    # Step 10 Daily Analysis schemas:
     Step10StartRequest,
     Step10StartResponse,
     Step10SubmitAnswerRequest,
@@ -66,7 +61,6 @@ from api.schemas import (
     Step10PauseResponse,
     Step10ProgressResponse,
     Step10QuestionData,
-    # Extended data schemas:
     SessionStateResponse,
     SessionStateUpdateRequest,
     FrameTrackingResponse,
@@ -77,14 +71,12 @@ from api.schemas import (
     TrackerSummaryCreateRequest,
     UserMetaResponse,
     UserMetaUpdateRequest,
-    # Gratitude schemas:
     GratitudeCreateRequest,
     GratitudeListResponse,
     GratitudeItem,
 )
 from api.steps import StepFlowService
-# Ensure handle_sos is imported here (assuming you placed it in chat_service)
-from core.chat_service import handle_chat, handle_sos, handle_thanks, handle_day 
+from core.chat_service import handle_chat, handle_sos, handle_thanks, handle_day
 from services.status import StatusService
 from services.users import UserService
 from services.profile import ProfileService
@@ -100,13 +92,11 @@ from repositories.GratitudeRepository import GratitudeRepository
 from datetime import date as date_class
 import pathlib
 
-# Load environment variables from backend.env in parent directory
 env_path = pathlib.Path(__file__).parent.parent.parent / "backend.env"
 load_dotenv(env_path)
 
 app = FastAPI(title="12STEPS Chat API")
 
-# Health check endpoint for Render (must be first to avoid conflicts)
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render and monitoring"""
@@ -117,13 +107,11 @@ async def root():
     """Root endpoint for basic health check"""
     return {"status": "ok", "service": "twelvesteps-backend", "message": "API is running"}
 
-# Initialize profile sections on startup if they don't exist
 @app.on_event("startup")
 async def startup_event():
     """Initialize profile sections on application startup"""
     try:
         from db.init_profile_sections import init_profile_sections
-        # Run in thread pool since init_profile_sections uses sync SQLAlchemy
         import asyncio
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, init_profile_sections)
@@ -159,9 +147,6 @@ async def auth_telegram_endpoint(
     session: AsyncSession = Depends(get_db)
 ) -> TelegramAuthResponse:
     """
-    Authenticate or register a Telegram user.
-    Returns user data, whether user is new, and access token (API key).
-    """
     try:
         service = UserService(session)
         user, is_new = await service.authenticate_telegram(
@@ -169,7 +154,7 @@ async def auth_telegram_endpoint(
             username=payload.username,
             first_name=payload.first_name
         )
-        
+
         return TelegramAuthResponse(
             user=build_user_schema(user),
             is_new=is_new,
@@ -191,8 +176,6 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
 @app.post("/thanks", response_model=ChatResponse)
 async def thanks_endpoint(payload: ChatRequest) -> ChatResponse:
     """
-    /thanks command endpoint. Returns support and motivation message.
-    """
     try:
         reply = await handle_thanks(payload.telegram_id, payload.debug)
         return reply
@@ -203,8 +186,6 @@ async def thanks_endpoint(payload: ChatRequest) -> ChatResponse:
 @app.post("/day", response_model=ChatResponse)
 async def day_endpoint(payload: ChatRequest) -> ChatResponse:
     """
-    /day command endpoint. Returns analysis and reflection message.
-    """
     try:
         reply = await handle_day(payload.telegram_id, payload.debug)
         return reply
@@ -213,19 +194,13 @@ async def day_endpoint(payload: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# --- SOS ENDPOINTS ---
 @app.post("/sos", response_model=SosResponse)
 async def sos_endpoint(payload: SosRequest) -> SosResponse:
     """
-    Generates a helpful example answer based on the user's last context 
-    and personalization settings.
-    """
     try:
-        # Call the function we created in the previous step
         reply_text = await handle_sos(payload.telegram_id)
         return SosResponse(reply=reply_text)
     except RuntimeError as e:
-        # Handle specific errors (like User not found)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as exc:
         traceback.print_exc()
@@ -236,9 +211,6 @@ async def sos_chat_endpoint(
     payload: SosChatRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> SosChatResponse:
-    """
-    Handles SOS chat dialog with GPT.
-    Supports different help types and maintains conversation history.
     """
     try:
         service = SosService(current_context.session)
@@ -259,7 +231,6 @@ async def sos_chat_endpoint(
     except Exception as exc:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(exc))
-# ------------------------
 
 
 @app.post("/auth/telegram", response_model=TelegramAuthResponse)
@@ -286,22 +257,17 @@ async def update_profile(
     service = UserService(current_user.session)
     updates = payload.model_dump(exclude_unset=True)
     user = await service.update_profile(current_user.user, updates)
-    
-    # IMPORTANT: Update personalized prompt when onboarding data changes
-    # This ensures the bot "remembers" onboarding answers from the start
+
     if any(key in updates for key in ['display_name', 'program_experience', 'sobriety_date']):
         from services.personalization_service import update_personalized_prompt_from_all_answers
-        # Use the updated user object instead of current_user.user to avoid greenlet issues
         await update_personalized_prompt_from_all_answers(current_user.session, user.id)
-    
-    # Flush to ensure updated_at is set by the database
+
     await current_user.session.flush()
-    
-    # Refresh to load updated_at from database before commit
+
     await current_user.session.refresh(user)
-    
+
     await current_user.session.commit()
-    
+
     return build_user_schema(user)
 
 
@@ -311,22 +277,19 @@ async def get_status(current_user: CurrentUserContext = Depends(get_current_user
     status_payload = await service.get_status_for_user(current_user.user)
     return StatusResponse(**status_payload)
 
-# --- Steps Endpoints ---
 
 @app.get("/steps/next", response_model=StepResponse)
 async def get_next_step_question(
-    current_context: CurrentUserContext = Depends(get_current_user) 
+    current_context: CurrentUserContext = Depends(get_current_user)
 ):
     """
-    Retrieves the next question for the user.
-    """
     service = StepFlowService(current_context.session)
-    
+
     question_text = await service.get_next_question_for_user(current_context.user.id)
-    
+
     if not question_text:
         return StepResponse(message="Program completed.", is_completed=True)
-        
+
     return StepResponse(
         message=question_text,
         is_completed=False
@@ -339,10 +302,10 @@ async def get_current_step(
     """Get current step information with progress indicators"""
     service = StepFlowService(current_context.session)
     step_info = await service.get_current_step_info(current_context.user.id)
-    
+
     if not step_info:
         return StepInfoResponse()
-    
+
     return StepInfoResponse(
         step_id=step_info.get("step_id"),
         step_number=step_info.get("step_number"),
@@ -362,10 +325,10 @@ async def get_step_detail(
     """Get detailed information about a specific step"""
     service = StepFlowService(current_context.session)
     step_detail = await service.get_step_detail(step_id)
-    
+
     if not step_detail:
         raise HTTPException(status_code=404, detail="Step not found")
-    
+
     return step_detail
 
 @app.get("/steps/list", response_model=StepListResponse)
@@ -377,9 +340,7 @@ async def get_all_steps(
     steps = await service.get_all_steps()
     return StepListResponse(steps=steps)
 
-# IMPORTANT: This route must be defined BEFORE /steps/{step_id}/questions
-# to avoid FastAPI treating "current" as a step_id parameter
-@app.get("/steps/current/questions")  # Temporarily removed response_model for debugging
+@app.get("/steps/current/questions")
 async def get_current_step_questions(
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
@@ -387,41 +348,37 @@ async def get_current_step_questions(
     import logging
     from sqlalchemy import select
     from db.models import Step, UserStep, StepProgressStatus
-    
+
     logger = logging.getLogger(__name__)
-    
+
     try:
         service = StepFlowService(current_context.session)
-        
-        # Get current step
+
         stmt_user_step = select(UserStep).where(
             UserStep.user_id == current_context.user.id,
             UserStep.status == StepProgressStatus.IN_PROGRESS
         )
         result = await current_context.session.execute(stmt_user_step)
         current_user_step = result.scalars().first()
-        
+
         if not current_user_step:
             raise HTTPException(status_code=404, detail="No step in progress")
-        
-        # Get step to get step number
+
         stmt_step = select(Step).where(Step.id == current_user_step.step_id)
         result_step = await current_context.session.execute(stmt_step)
         step = result_step.scalars().first()
-        
+
         if not step:
             raise HTTPException(status_code=404, detail="Step not found")
-        
+
         logger.info(f"Getting questions for step_id={step.id}, step.index={step.index}")
-        
+
         questions = await service.get_current_step_questions(current_context.user.id)
         logger.info(f"Retrieved {len(questions)} questions: {questions}")
-        
-        # Convert dict list to StepQuestionItem list
+
         question_items = []
         for q in questions:
             try:
-                # Ensure we have both id and text
                 if not isinstance(q, dict):
                     logger.error(f"Question is not a dict: {q}, type: {type(q)}")
                     continue
@@ -432,8 +389,7 @@ async def get_current_step_questions(
             except (KeyError, TypeError, ValueError) as e:
                 logger.error(f"Error converting question to StepQuestionItem: {q}, error: {e}")
                 continue
-        
-        # Ensure step.index is not None and is int
+
         if step.index is None:
             logger.warning(f"Step {step.id} has None index, defaulting to 0")
             step_number = 0
@@ -443,8 +399,7 @@ async def get_current_step_questions(
             except (ValueError, TypeError) as e:
                 logger.error(f"Error converting step.index to int: {step.index}, error: {e}")
                 step_number = 0
-        
-        # Ensure step_id is int
+
         if step.id is None:
             logger.error(f"Step has None id")
             raise HTTPException(status_code=500, detail="Step has no id")
@@ -453,24 +408,22 @@ async def get_current_step_questions(
         except (ValueError, TypeError) as e:
             logger.error(f"Error converting step.id to int: {step.id}, error: {e}")
             raise HTTPException(status_code=500, detail="Invalid step id")
-        
+
         logger.info(f"Returning response: step_id={step_id_int}, step_number={step_number}, questions_count={len(question_items)}")
-        
-        # Convert question_items to simple dicts
+
         questions_list = [{"id": q.id, "text": q.text} for q in question_items]
-        
+
         logger.info(f"Questions list: {questions_list}")
-        
-        # Return simple dict without Pydantic validation
+
         response_dict = {
             "step_id": step_id_int,
             "step_number": step_number,
             "questions": questions_list
         }
-        
+
         logger.info(f"Returning dict: {response_dict}")
         return response_dict
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -485,33 +438,29 @@ async def get_step_questions(
     """Get list of questions for a specific step by step_id"""
     from sqlalchemy import select
     from db.models import Step
-    
+
     service = StepFlowService(current_context.session)
-    
-    # Get step to get step number
+
     stmt = select(Step).where(Step.id == step_id)
     result = await current_context.session.execute(stmt)
     step = result.scalars().first()
-    
+
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
-    
+
     questions = await service.get_step_questions(step_id)
-    
-    # Convert dict list to StepQuestionItem list
+
     question_items = []
     for q in questions:
         try:
             question_items.append(StepQuestionItem(id=q["id"], text=q["text"]))
         except (KeyError, TypeError) as e:
-            # Log error but continue
             import logging
             logging.error(f"Error converting question to StepQuestionItem: {q}, error: {e}")
             continue
-    
-    # Ensure step.index is not None
+
     step_number = step.index if step.index is not None else 0
-    
+
     return StepQuestionsResponse(
         step_id=step_id,
         step_number=step_number,
@@ -524,25 +473,21 @@ async def submit_answer(
     current_context: CurrentUserContext = Depends(get_current_user)
 ):
     """
-    Submits an answer to the currently active question (Tail).
-    Supports both plain text and template-structured JSON answers.
-    Validates minimum answer length to prevent accidental skipping.
-    """
     service = StepFlowService(current_context.session)
-    
+
     success, error_message = await service.save_user_answer(
-        current_context.user.id, 
+        current_context.user.id,
         answer_data.text,
         is_template_format=answer_data.is_template_format,
         skip_validation=getattr(answer_data, 'skip_validation', False)
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=400,
             detail=error_message or "No active question found to answer. Please call /steps/next first."
         )
-    
+
     return {"status": "success", "message": "Answer saved."}
 
 @app.post("/steps/draft", response_model=DraftResponse)
@@ -553,19 +498,19 @@ async def save_draft(
     """Save draft answer in Tail.payload without closing Tail"""
     import logging
     logger = logging.getLogger(__name__)
-    
+
     service = StepFlowService(current_context.session)
     logger.info(f"Saving draft for user {current_context.user.id}, text length: {len(draft_data.draft_text)}")
     success = await service.save_draft(current_context.user.id, draft_data.draft_text)
     logger.info(f"Draft save result for user {current_context.user.id}: success={success}")
-    
+
     if not success:
         logger.warning(f"Failed to save draft for user {current_context.user.id}: no active Tail")
         raise HTTPException(
             status_code=400,
             detail="No active question found to save draft."
         )
-    
+
     return DraftResponse(success=True, draft=draft_data.draft_text)
 
 @app.get("/steps/draft", response_model=DraftResponse)
@@ -575,12 +520,12 @@ async def get_draft(
     """Get draft from active Tail if exists"""
     import logging
     logger = logging.getLogger(__name__)
-    
+
     service = StepFlowService(current_context.session)
     draft = await service.get_active_tail_draft(current_context.user.id)
-    
+
     logger.info(f"Getting draft for user {current_context.user.id}: draft={draft[:50] if draft else None}...")
-    
+
     return DraftResponse(success=draft is not None, draft=draft)
 
 @app.get("/steps/current/question-id")
@@ -590,10 +535,10 @@ async def get_current_question_id(
     """Get question_id from active Tail if exists"""
     service = StepFlowService(current_context.session)
     question_id = await service.get_active_question_id(current_context.user.id)
-    
+
     if question_id is None:
         raise HTTPException(status_code=404, detail="No active question found")
-    
+
     return {"question_id": question_id}
 
 @app.get("/steps/last-answered/question-id")
@@ -603,10 +548,10 @@ async def get_last_answered_question_id(
     """Get question_id from the last answered question (last closed Tail)"""
     service = StepFlowService(current_context.session)
     question_id = await service.get_last_answered_question_id(current_context.user.id)
-    
+
     if question_id is None:
         raise HTTPException(status_code=404, detail="No answered question found")
-    
+
     return {"question_id": question_id}
 
 @app.get("/steps/question/{question_id}/previous", response_model=PreviousAnswerResponse)
@@ -617,7 +562,7 @@ async def get_previous_answer(
     """Get previous answer for a question if exists"""
     service = StepFlowService(current_context.session)
     answer_text = await service.get_previous_answer(current_context.user.id, question_id)
-    
+
     return PreviousAnswerResponse(question_id=question_id, answer_text=answer_text)
 
 @app.get("/steps/question/{question_id}/examples")
@@ -629,7 +574,7 @@ async def get_example_answers(
     """Get example answers for a question from other users (anonymized)"""
     service = StepFlowService(current_context.session)
     examples = await service.get_example_answers(question_id, current_context.user.id, limit)
-    
+
     return {"examples": examples, "count": len(examples)}
 
 @app.post("/steps/switch-question", response_model=StepResponse)
@@ -640,16 +585,16 @@ async def switch_to_question(
     """Switch to a specific question in current step"""
     service = StepFlowService(current_context.session)
     question_text = await service.switch_to_question(
-        current_context.user.id, 
+        current_context.user.id,
         switch_data.question_id
     )
-    
+
     if not question_text:
         raise HTTPException(
             status_code=400,
             detail="Cannot switch to this question. It may not belong to current step."
         )
-    
+
     return StepResponse(message=question_text, is_completed=False)
 
 @app.post("/steps/switch")
@@ -661,9 +606,8 @@ async def switch_step(
     step_id = switch_data.get("step_id")
     if not step_id:
         raise HTTPException(status_code=400, detail="step_id is required")
-    
+
     service = StepFlowService(current_context.session)
-    # Close current step if in progress
     from sqlalchemy import select
     from db.models import UserStep, StepProgressStatus
     stmt = select(UserStep).where(
@@ -673,27 +617,23 @@ async def switch_step(
     result = await current_context.session.execute(stmt)
     current_user_step = result.scalars().first()
     if current_user_step:
-        # Set current step to NOT_STARTED (since PAUSED doesn't exist in enum)
-        # This allows user to resume later without losing progress
         current_user_step.status = StepProgressStatus.NOT_STARTED
-    
-    # Initialize new step
+
     from db.models import Step
     stmt_step = select(Step).where(Step.id == step_id)
     result_step = await current_context.session.execute(stmt_step)
     step = result_step.scalars().first()
-    
+
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
-    
-    # Create or update UserStep
+
     stmt_user_step = select(UserStep).where(
         UserStep.user_id == current_context.user.id,
         UserStep.step_id == step_id
     )
     result_user_step = await current_context.session.execute(stmt_user_step)
     user_step = result_user_step.scalars().first()
-    
+
     if user_step:
         user_step.status = StepProgressStatus.IN_PROGRESS
     else:
@@ -705,14 +645,13 @@ async def switch_step(
             started_at=datetime.now()
         )
         current_context.session.add(user_step)
-    
+
     await current_context.session.commit()
-    
-    # Get next question
+
     question_text = await service.get_next_question_for_user(current_context.user.id)
     if not question_text:
         return StepResponse(message="No questions in this step.", is_completed=True)
-    
+
     return StepResponse(message=question_text, is_completed=False)
 
 @app.get("/steps/question/{question_id}")
@@ -724,33 +663,29 @@ async def get_question_detail(
     from sqlalchemy import select
     from db.models import Question, Step
     service = StepFlowService(current_context.session)
-    
-    # Get question
+
     stmt = select(Question).where(Question.id == question_id)
     result = await current_context.session.execute(stmt)
     question = result.scalars().first()
-    
+
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
-    
-    # Get step info
+
     stmt_step = select(Step).where(Step.id == question.step_id)
     result_step = await current_context.session.execute(stmt_step)
     step = result_step.scalars().first()
-    
-    # Get total questions in step
+
     stmt_count = select(Question).where(Question.step_id == question.step_id)
     result_count = await current_context.session.execute(stmt_count)
     all_questions = result_count.scalars().all()
     total_questions = len(all_questions)
-    
-    # Find question number
+
     question_number = 1
     for i, q in enumerate(all_questions, 1):
         if q.id == question_id:
             question_number = i
             break
-    
+
     return {
         "question_id": question_id,
         "question_text": question.text,
@@ -760,7 +695,6 @@ async def get_question_detail(
         "step_number": step.index if step else None
     }
 
-# --- Steps Settings Endpoints ---
 
 @app.get("/steps/settings", response_model=StepsSettingsResponse)
 async def get_steps_settings(
@@ -778,7 +712,7 @@ async def update_steps_settings(
 ):
     """Update steps settings for user"""
     service = StepsSettingsService(current_context.session)
-    
+
     try:
         settings = await service.update_settings(
             user_id=current_context.user.id,
@@ -795,7 +729,6 @@ async def update_steps_settings(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# --- Profile Endpoints ---
 
 @app.get("/profile/sections", response_model=ProfileSectionListResponse)
 async def get_profile_sections(
@@ -805,15 +738,14 @@ async def get_profile_sections(
     try:
         service = ProfileService(current_user.session)
         sections = await service.get_all_sections(current_user.user.id)
-        
-        # Log for debugging
+
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"Returning {len(sections)} sections for user {current_user.user.id}")
         for section in sections:
             questions_count = len(section.questions) if hasattr(section, 'questions') and section.questions else 0
             logger.info(f"Section {section.id}: {section.name}, questions count: {questions_count}")
-        
+
         return ProfileSectionListResponse(sections=sections)
     except Exception as e:
         import logging
@@ -833,11 +765,10 @@ async def get_section_detail(
     try:
         service = ProfileService(current_user.session)
         section = await service.get_section_detail(section_id, current_user.user.id)
-        
+
         if not section:
             raise HTTPException(status_code=404, detail="Section not found")
-        
-        # Convert to detail schema with questions
+
         detail_schema = ProfileSectionDetailSchema(
             id=section.id,
             name=section.name,
@@ -850,7 +781,7 @@ async def get_section_detail(
             questions=[q for q in section.questions],
             has_data=getattr(section, 'has_data', False),
         )
-        
+
         return ProfileSectionDetailResponse(section=detail_schema)
     except Exception as e:
         import logging
@@ -869,7 +800,7 @@ async def get_user_answers_for_section(
     """Get user's answers for questions in a section"""
     service = ProfileService(current_user.session)
     answers = await service.repo.get_user_answers_for_section(current_user.user.id, section_id)
-    
+
     return {
         "answers": [
             {
@@ -891,27 +822,25 @@ async def submit_profile_answer(
 ):
     """Save answer to a profile question and update personalized prompt"""
     service = ProfileService(current_user.session)
-    
-    # Verify question belongs to section (unless it's a generated question with id=None)
+
     if answer_data.question_id is not None:
         section = await service.get_section_detail(section_id, current_user.user.id)
         if not section:
             raise HTTPException(status_code=404, detail="Section not found")
-        
+
         question_ids = [q.id for q in section.questions]
         if answer_data.question_id not in question_ids:
             raise HTTPException(
                 status_code=400,
                 detail="Question does not belong to this section"
             )
-        
+
         answer, next_question = await service.save_answer(
             current_user.user.id,
             answer_data.question_id,
             answer_data.answer_text
         )
-        
-        # Debug logging
+
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[submit_profile_answer] User {current_user.user.id}, question_id={answer_data.question_id}, "
@@ -919,55 +848,42 @@ async def submit_profile_answer(
                    f"next_question_id={next_question.id if next_question else None}, "
                    f"next_question_text={next_question.question_text[:50] if next_question else None}...")
     else:
-        # Generated question - save as free text in section
-        # Append to existing free text instead of overwriting
         section_data_existing = await service.repo.get_section_data(
             current_user.user.id, section_id
         )
         if section_data_existing and section_data_existing.content:
-            # Append to existing content
             new_content = f"{section_data_existing.content}\n\n[Сгенерированный вопрос]\n{answer_data.answer_text}"
         else:
-            # New free text entry
             new_content = f"[Сгенерированный вопрос]\n{answer_data.answer_text}"
-        
+
         section_data = await service.save_free_text(
             current_user.user.id,
             section_id,
             new_content
         )
-        # Don't generate another follow-up question after answering a generated question
-        # This prevents infinite loops - limit to 1 follow-up question per section
         next_question = None
         answer = None
-    
-    # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
-    # This builds a complete picture of the user's character
+
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
-    
-    # Commit the transaction to save the answer and updated prompt
+
     await current_user.session.commit()
-    
+
     response = {
         "status": "success",
         "message": "Answer saved",
         "answer_id": answer.id if answer else None,
     }
-    
-    # Add next question if available
+
     if next_question:
-        # Check if it's a generated question (id=-1) or regular question
         if next_question.id == -1:
-            # Generated follow-up question
             response["next_question"] = {
-                "id": None,  # No DB ID for generated questions
+                "id": None,
                 "text": next_question.question_text,
                 "is_optional": True,
-                "is_generated": True  # Flag to indicate it's generated
+                "is_generated": True
             }
         else:
-            # Regular question from DB
             response["next_question"] = {
                 "id": next_question.id,
                 "text": next_question.question_text,
@@ -976,7 +892,7 @@ async def submit_profile_answer(
             }
     else:
         response["message"] = "Answer saved. All questions in this section are completed."
-    
+
     return response
 
 
@@ -988,26 +904,22 @@ async def submit_free_text(
 ):
     """Save free text to a profile section and update personalized prompt"""
     service = ProfileService(current_user.session)
-    
-    # Verify section exists
+
     section = await service.get_section_detail(section_id, current_user.user.id)
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
-    
+
     data = await service.save_free_text(
         current_user.user.id,
         section_id,
         free_text_data.text
     )
-    
-    # IMPORTANT: Update personalized prompt with ALL answers (profile + steps)
-    # This builds a complete picture of the user's character
+
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
-    
-    # Commit the transaction to save the free text and updated prompt
+
     await current_user.session.commit()
-    
+
     return {
         "status": "success",
         "message": "Free text saved",
@@ -1021,38 +933,33 @@ async def submit_general_free_text(
     current_user: CurrentUserContext = Depends(get_current_user)
 ):
     """
-    Process general free text (without section_id) and distribute it across profile sections.
-    Uses LLM to analyze and distribute information to appropriate sections.
-    """
     if free_text_data.section_id is not None:
         raise HTTPException(
             status_code=400,
             detail="This endpoint is for general free text only. Use /profile/sections/{section_id}/free-text for specific section."
         )
-    
-    # Use process_profile_free_text to distribute across sections
+
     from core.chat_service import process_profile_free_text
     import logging
     logger = logging.getLogger(__name__)
-    
+
     try:
         logger.info(f"Processing free text for user {current_user.user.id}: {free_text_data.text[:100]}...")
         result = await process_profile_free_text(
             user_id=current_user.user.id,
             free_text=free_text_data.text,
-            debug=True  # Enable debug to see what's happening
+            debug=True
         )
-        
+
         saved_sections = result.get("saved_sections", [])
         logger.info(f"Free text processed: {len(saved_sections)} sections saved: {[s.get('section_name') for s in saved_sections]}")
-        
-        # Update personalized prompt after distribution
+
         from services.personalization_service import update_personalized_prompt_from_all_answers
         await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
         await current_user.session.commit()
-        
+
         logger.info(f"Free text processing completed for user {current_user.user.id}")
-        
+
         return {
             "status": result.get("status", "success"),
             "message": result.get("message", "Free text processed and distributed"),
@@ -1071,8 +978,7 @@ async def get_free_text_history(
     """Get all free text entries (history) for the user across all sections"""
     from sqlalchemy import select
     from db.models import ProfileSectionData, ProfileSection
-    
-    # Get all free text entries for user with section names and metadata
+
     query = (
         select(
             ProfileSectionData.id,
@@ -1093,16 +999,15 @@ async def get_free_text_history(
         .where(ProfileSectionData.content != "")
         .order_by(ProfileSectionData.created_at.desc())
     )
-    
+
     result = await current_user.session.execute(query)
     entries = result.all()
-    
+
     history_items = []
     for entry in entries:
-        # Extract text preview (first 100 chars)
         content = entry.content or ""
         preview = content[:100] + "..." if len(content) > 100 else content
-        
+
         history_items.append({
             "id": entry.id,
             "section_id": entry.section_id,
@@ -1117,7 +1022,7 @@ async def get_free_text_history(
             "created_at": entry.created_at.isoformat() if entry.created_at else None,
             "updated_at": entry.updated_at.isoformat() if entry.updated_at else None
         })
-    
+
     return {
         "status": "success",
         "total": len(history_items),
@@ -1138,7 +1043,7 @@ async def get_section_history(
         section_id,
         limit
     )
-    
+
     return {
         "status": "success",
         "section_id": section_id,
@@ -1168,7 +1073,7 @@ async def create_section_data_entry(
 ):
     """Create a new entry in a section (manual addition)"""
     service = ProfileService(current_user.session)
-    
+
     entry = await service.save_free_text(
         user_id=current_user.user.id,
         section_id=section_id,
@@ -1179,13 +1084,12 @@ async def create_section_data_entry(
         is_core_personality=data.is_core_personality,
         tags=data.tags
     )
-    
-    # IMPORTANT: Update personalized prompt after creating entry
+
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
-    
+
     await current_user.session.commit()
-    
+
     return {
         "status": "success",
         "message": "Entry created",
@@ -1212,18 +1116,17 @@ async def update_section_data_entry(
     """Update an existing entry"""
     from sqlalchemy import select
     from db.models import ProfileSectionData
-    
+
     query = select(ProfileSectionData).where(
         ProfileSectionData.id == data_id,
         ProfileSectionData.user_id == current_user.user.id
     )
     result = await current_user.session.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
-    
-    # Update fields if provided
+
     if data.content is not None:
         entry.content = data.content
     if data.subblock_name is not None:
@@ -1236,22 +1139,18 @@ async def update_section_data_entry(
         entry.is_core_personality = data.is_core_personality
     if data.tags is not None:
         entry.tags = data.tags
-    
-    # IMPORTANT: Update personalized prompt after updating entry
+
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
-    
-    # Flush to ensure updated_at is set by the database
+
     await current_user.session.flush()
-    
-    # Refresh to load updated_at from database
+
     await current_user.session.refresh(entry)
-    
-    # Get updated_at value before commit
+
     updated_at_value = entry.updated_at.isoformat() if entry.updated_at else None
-    
+
     await current_user.session.commit()
-    
+
     return {
         "status": "success",
         "message": "Entry updated",
@@ -1277,27 +1176,26 @@ async def delete_section_data_entry(
     """Delete an entry"""
     from sqlalchemy import select, delete
     from db.models import ProfileSectionData
-    
+
     query = select(ProfileSectionData).where(
         ProfileSectionData.id == data_id,
         ProfileSectionData.user_id == current_user.user.id
     )
     result = await current_user.session.execute(query)
     entry = result.scalar_one_or_none()
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
-    
+
     await current_user.session.execute(
         delete(ProfileSectionData).where(ProfileSectionData.id == data_id)
     )
-    
-    # IMPORTANT: Update personalized prompt after deleting entry
+
     from services.personalization_service import update_personalized_prompt_from_all_answers
     await update_personalized_prompt_from_all_answers(current_user.session, current_user.user.id)
-    
+
     await current_user.session.commit()
-    
+
     return {
         "status": "success",
         "message": "Entry deleted"
@@ -1311,13 +1209,13 @@ async def create_custom_section(
 ):
     """Create a custom profile section"""
     service = ProfileService(current_user.session)
-    
+
     section = await service.create_custom_section(
         current_user.user.id,
         section_data.name,
         section_data.icon
     )
-    
+
     return {
         "status": "success",
         "message": "Custom section created",
@@ -1332,14 +1230,13 @@ async def get_section_summary(
 ) -> SectionSummaryResponse:
     """Get summary statistics for a section"""
     service = ProfileService(current_user.session)
-    
-    # Verify section exists
+
     section = await service.get_section_detail(section_id, current_user.user.id)
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
-    
+
     summary = await service.get_section_summary(current_user.user.id, section_id)
-    
+
     return SectionSummaryResponse(**summary)
 
 
@@ -1351,28 +1248,27 @@ async def update_section(
 ):
     """Update a custom section (only custom sections can be updated)"""
     service = ProfileService(current_user.session)
-    
-    # Verify section exists and is custom
+
     section = await service.get_section_detail(section_id, current_user.user.id)
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
-    
+
     if not section.is_custom or section.user_id != current_user.user.id:
         raise HTTPException(
             status_code=403,
             detail="Only custom sections can be updated by their owner"
         )
-    
+
     updated_section = await service.update_section(
         section_id,
         update_data.name,
         update_data.icon,
         update_data.order_index
     )
-    
+
     if not updated_section:
         raise HTTPException(status_code=400, detail="Failed to update section")
-    
+
     return {
         "status": "success",
         "message": "Section updated",
@@ -1387,23 +1283,22 @@ async def delete_section(
 ):
     """Delete a custom section (only custom sections can be deleted by their owner)"""
     service = ProfileService(current_user.session)
-    
-    # Verify section exists and is custom
+
     section = await service.get_section_detail(section_id, current_user.user.id)
     if not section:
         raise HTTPException(status_code=404, detail="Section not found")
-    
+
     if not section.is_custom or section.user_id != current_user.user.id:
         raise HTTPException(
             status_code=403,
             detail="Only custom sections can be deleted by their owner"
         )
-    
+
     deleted = await service.delete_section(section_id, current_user.user.id)
-    
+
     if not deleted:
         raise HTTPException(status_code=400, detail="Failed to delete section")
-    
+
     return {
         "status": "success",
         "message": "Section deleted",
@@ -1411,7 +1306,6 @@ async def delete_section(
     }
 
 
-# --- Answer Template Endpoints ---
 
 @app.get("/steps/templates", response_model=AnswerTemplateListResponse)
 async def get_templates(
@@ -1420,8 +1314,7 @@ async def get_templates(
     """Get all available templates (author + user's custom)"""
     service = TemplateService(current_user.session)
     templates = await service.get_all_templates(current_user.user.id)
-    
-    # Convert templates to schemas, handling enum serialization
+
     from api.schemas import AnswerTemplateSchema
     template_schemas = []
     for template in templates:
@@ -1434,7 +1327,7 @@ async def get_templates(
             created_at=template.created_at,
             updated_at=template.updated_at
         ))
-    
+
     return AnswerTemplateListResponse(
         templates=template_schemas,
         active_template_id=current_user.user.active_template_id
@@ -1448,13 +1341,13 @@ async def create_template(
 ):
     """Create a custom template"""
     service = TemplateService(current_user.session)
-    
+
     template = await service.create_template(
         current_user.user.id,
         template_data.name,
         template_data.structure
     )
-    
+
     return {
         "status": "success",
         "message": "Template created",
@@ -1470,20 +1363,20 @@ async def update_template(
 ):
     """Update a custom template (only user's own templates)"""
     service = TemplateService(current_user.session)
-    
+
     updated_template = await service.update_template(
         template_id,
         current_user.user.id,
         update_data.name,
         update_data.structure
     )
-    
+
     if not updated_template:
         raise HTTPException(
             status_code=404,
             detail="Template not found or you don't have permission to update it"
         )
-    
+
     return {
         "status": "success",
         "message": "Template updated",
@@ -1498,18 +1391,18 @@ async def set_active_template(
 ):
     """Set active template for user (None to reset to default)"""
     service = TemplateService(current_user.session)
-    
+
     success = await service.set_active_template(
         current_user.user,
         template_request.template_id
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=400,
             detail="Template not found or not available"
         )
-    
+
     return {
         "status": "success",
         "message": "Active template updated",
@@ -1525,10 +1418,9 @@ async def save_session_context(
     from repositories.SessionContextRepository import SessionContextRepository
     from db.models import SessionType
     from api.schemas import SessionContextResponse
-    
+
     session_context_repo = SessionContextRepository(current_context.session)
-    
-    # Convert string to enum
+
     session_type_map = {
         "STEPS": SessionType.STEPS,
         "DAY": SessionType.DAY,
@@ -1538,16 +1430,16 @@ async def save_session_context(
     session_type = session_type_map.get(session_type_str)
     if not session_type:
         raise HTTPException(status_code=400, detail="Invalid session_type")
-    
+
     context_data = payload.get("context_data", {})
-    
+
     context = await session_context_repo.create_or_update_context(
         current_context.user.id,
         session_type,
         context_data
     )
     await current_context.session.commit()
-    
+
     return SessionContextResponse(
         id=context.id,
         user_id=context.user_id,
@@ -1566,9 +1458,9 @@ async def get_session_context(
     from repositories.SessionContextRepository import SessionContextRepository
     from db.models import SessionType
     from api.schemas import SessionContextResponse
-    
+
     session_context_repo = SessionContextRepository(current_context.session)
-    
+
     session_type_enum = None
     if session_type:
         session_type_map = {
@@ -1577,15 +1469,15 @@ async def get_session_context(
             "CHAT": SessionType.CHAT
         }
         session_type_enum = session_type_map.get(session_type.upper())
-    
+
     context = await session_context_repo.get_active_context(
         current_context.user.id,
         session_type_enum
     )
-    
+
     if not context:
         return None
-    
+
     return SessionContextResponse(
         id=context.id,
         user_id=context.user_id,
@@ -1596,9 +1488,7 @@ async def get_session_context(
     )
 
 
-# --- Extended Data Endpoints ---
 
-# SessionState endpoints
 @app.get("/user/state", response_model=SessionStateResponse)
 async def get_user_state(
     current_context: CurrentUserContext = Depends(get_current_user)
@@ -1606,10 +1496,10 @@ async def get_user_state(
     """Get operational state (SessionState) for current user"""
     repo = SessionStateRepository(current_context.session)
     state = await repo.get_by_user_id(current_context.user.id)
-    
+
     if not state:
         raise HTTPException(status_code=404, detail="SessionState not found")
-    
+
     return SessionStateResponse(
         id=state.id,
         user_id=state.user_id,
@@ -1640,7 +1530,7 @@ async def update_user_state(
     )
     await current_context.session.commit()
     await current_context.session.refresh(state)
-    
+
     return SessionStateResponse(
         id=state.id,
         user_id=state.user_id,
@@ -1654,7 +1544,6 @@ async def update_user_state(
     )
 
 
-# FrameTracking endpoints
 @app.get("/user/frames", response_model=FrameTrackingResponse)
 async def get_user_frames(
     current_context: CurrentUserContext = Depends(get_current_user)
@@ -1662,10 +1551,10 @@ async def get_user_frames(
     """Get frame tracking (FrameTracking) for current user"""
     repo = FrameTrackingRepository(current_context.session)
     tracking = await repo.get_by_user_id(current_context.user.id)
-    
+
     if not tracking:
         raise HTTPException(status_code=404, detail="FrameTracking not found")
-    
+
     return FrameTrackingResponse(
         id=tracking.id,
         user_id=tracking.user_id,
@@ -1696,7 +1585,7 @@ async def update_user_frames(
     )
     await current_context.session.commit()
     await current_context.session.refresh(tracking)
-    
+
     return FrameTrackingResponse(
         id=tracking.id,
         user_id=tracking.user_id,
@@ -1710,7 +1599,6 @@ async def update_user_frames(
     )
 
 
-# QAStatus endpoints
 @app.get("/user/qa-status", response_model=QAStatusResponse)
 async def get_user_qa_status(
     current_context: CurrentUserContext = Depends(get_current_user)
@@ -1718,10 +1606,10 @@ async def get_user_qa_status(
     """Get QA status for current user"""
     repo = QAStatusRepository(current_context.session)
     qa_status = await repo.get_by_user_id(current_context.user.id)
-    
+
     if not qa_status:
         raise HTTPException(status_code=404, detail="QAStatus not found")
-    
+
     return QAStatusResponse(
         id=qa_status.id,
         user_id=qa_status.user_id,
@@ -1750,7 +1638,7 @@ async def update_user_qa_status(
     )
     await current_context.session.commit()
     await current_context.session.refresh(qa_status)
-    
+
     return QAStatusResponse(
         id=qa_status.id,
         user_id=qa_status.user_id,
@@ -1763,7 +1651,6 @@ async def update_user_qa_status(
     )
 
 
-# TrackerSummary endpoints
 @app.get("/user/tracker-summary", response_model=TrackerSummaryResponse)
 async def get_user_tracker_summary(
     date: Optional[date_class] = None,
@@ -1771,15 +1658,15 @@ async def get_user_tracker_summary(
 ) -> TrackerSummaryResponse:
     """Get tracker summary for current user (by date or latest)"""
     repo = TrackerSummaryRepository(current_context.session)
-    
+
     if date:
         summary = await repo.get_by_user_and_date(current_context.user.id, date)
     else:
         summary = await repo.get_latest(current_context.user.id)
-    
+
     if not summary:
         raise HTTPException(status_code=404, detail="TrackerSummary not found")
-    
+
     return TrackerSummaryResponse(
         id=summary.id,
         user_id=summary.user_id,
@@ -1812,7 +1699,7 @@ async def create_or_update_tracker_summary(
     )
     await current_context.session.commit()
     await current_context.session.refresh(summary)
-    
+
     return TrackerSummaryResponse(
         id=summary.id,
         user_id=summary.user_id,
@@ -1827,7 +1714,6 @@ async def create_or_update_tracker_summary(
     )
 
 
-# UserMeta endpoints
 @app.get("/user/meta", response_model=UserMetaResponse)
 async def get_user_meta(
     current_context: CurrentUserContext = Depends(get_current_user)
@@ -1835,10 +1721,10 @@ async def get_user_meta(
     """Get user metadata for current user"""
     repo = UserMetaRepository(current_context.session)
     meta = await repo.get_by_user_id(current_context.user.id)
-    
+
     if not meta:
         raise HTTPException(status_code=404, detail="UserMeta not found")
-    
+
     return UserMetaResponse(
         id=meta.id,
         user_id=meta.user_id,
@@ -1869,7 +1755,7 @@ async def update_user_meta(
     )
     await current_context.session.commit()
     await current_context.session.refresh(meta)
-    
+
     return UserMetaResponse(
         id=meta.id,
         user_id=meta.user_id,
@@ -1883,19 +1769,12 @@ async def update_user_meta(
     )
 
 
-# ============================================================
-# TEMPLATE PROGRESS ENDPOINTS (FSM для пошагового заполнения)
-# ============================================================
 
 @app.post("/template-progress/start", response_model=TemplateProgressResponse)
 async def start_template_progress(
     payload: TemplateProgressStartRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplateProgressResponse:
-    """
-    Начать или продолжить заполнение шаблона для вопроса.
-    Если есть незавершённый прогресс — возвращает его состояние.
-    Если прогресс на паузе — возобновляет его.
     """
     service = TemplateService(current_context.session)
     result = await service.start_template_filling(
@@ -1904,11 +1783,11 @@ async def start_template_progress(
         question_id=payload.question_id
     )
     await current_context.session.commit()
-    
+
     field_info = None
     if result.get("field_info"):
         field_info = TemplateFieldInfo(**result["field_info"])
-    
+
     return TemplateProgressResponse(
         progress_id=result.get("progress_id"),
         status=result.get("status", "IN_PROGRESS"),
@@ -1927,9 +1806,6 @@ async def submit_template_field(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplateFieldSubmitResponse:
     """
-    Сохранить значение текущего поля шаблона и получить следующее.
-    Валидирует ввод (например, минимум 3 чувства для feelings_before).
-    """
     service = TemplateService(current_context.session)
     result = await service.submit_field_value(
         user_id=current_context.user.id,
@@ -1938,11 +1814,11 @@ async def submit_template_field(
         value=payload.value
     )
     await current_context.session.commit()
-    
+
     field_info = None
     if result.get("field_info"):
         field_info = TemplateFieldInfo(**result["field_info"])
-    
+
     return TemplateFieldSubmitResponse(
         success=result.get("success", False),
         error=result.get("error"),
@@ -1965,9 +1841,6 @@ async def pause_template_progress(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplatePauseResponse:
     """
-    Поставить заполнение шаблона на паузу.
-    Сохраняет текущий прогресс, можно вернуться позже.
-    """
     service = TemplateService(current_context.session)
     result = await service.pause_template_filling(
         user_id=current_context.user.id,
@@ -1975,7 +1848,7 @@ async def pause_template_progress(
         question_id=payload.question_id
     )
     await current_context.session.commit()
-    
+
     return TemplatePauseResponse(
         success=result.get("success", False),
         error=result.get("error"),
@@ -1992,23 +1865,20 @@ async def get_current_template_progress(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplateProgressResponse:
     """
-    Получить текущий прогресс заполнения шаблона для вопроса.
-    Возвращает 404, если прогресс не найден.
-    """
     service = TemplateService(current_context.session)
     result = await service.get_template_progress(
         user_id=current_context.user.id,
         step_id=step_id,
         question_id=question_id
     )
-    
+
     if not result:
         raise HTTPException(status_code=404, detail="Template progress not found")
-    
+
     field_info = None
     if result.get("field_info"):
         field_info = TemplateFieldInfo(**result["field_info"])
-    
+
     return TemplateProgressResponse(
         progress_id=result.get("progress_id"),
         status=result.get("status", "IN_PROGRESS"),
@@ -2027,11 +1897,8 @@ async def get_template_fields_info(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplateFieldsInfoResponse:
     """
-    Получить информацию о всех полях шаблона.
-    Возвращает список полей и минимальное количество ситуаций.
-    """
     service = TemplateService(current_context.session)
-    
+
     return TemplateFieldsInfoResponse(
         fields=service.get_template_fields_info(),
         min_situations=service.get_min_situations()
@@ -2045,9 +1912,6 @@ async def cancel_template_progress(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> dict:
     """
-    Отменить заполнение шаблона.
-    Удаляет текущий прогресс без сохранения.
-    """
     service = TemplateService(current_context.session)
     result = await service.cancel_template_filling(
         user_id=current_context.user.id,
@@ -2055,11 +1919,10 @@ async def cancel_template_progress(
         question_id=question_id
     )
     await current_context.session.commit()
-    
+
     return result
 
 
-# --- STEP 10 DAILY ANALYSIS ENDPOINTS ---
 
 from services.step10_service import Step10Service
 
@@ -2070,21 +1933,19 @@ async def start_step10_analysis(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10StartResponse:
     """
-    Начать или продолжить ежедневный самоанализ по 10 шагу.
-    """
     service = Step10Service(current_context.session)
     result = await service.start_analysis(
         user_id=current_context.user.id,
         analysis_date=payload.analysis_date
     )
     await current_context.session.commit()
-    
+
     question_data = Step10QuestionData(
         number=result["question_data"]["number"],
         text=result["question_data"]["text"],
         subtext=result["question_data"].get("subtext")
     )
-    
+
     return Step10StartResponse(
         analysis_id=result["analysis_id"],
         status=result["status"],
@@ -2102,8 +1963,6 @@ async def submit_step10_answer(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10SubmitAnswerResponse:
     """
-    Сохранить ответ на вопрос самоанализа.
-    """
     service = Step10Service(current_context.session)
     result = await service.submit_answer(
         user_id=current_context.user.id,
@@ -2112,7 +1971,7 @@ async def submit_step10_answer(
         analysis_date=payload.analysis_date
     )
     await current_context.session.commit()
-    
+
     if not result.get("success"):
         return Step10SubmitAnswerResponse(
             success=False,
@@ -2120,7 +1979,7 @@ async def submit_step10_answer(
             is_complete=False,
             progress_summary=""
         )
-    
+
     next_question_data = None
     if result.get("next_question_data"):
         qd = result["next_question_data"]
@@ -2129,7 +1988,7 @@ async def submit_step10_answer(
             text=qd["text"],
             subtext=qd.get("subtext")
         )
-    
+
     return Step10SubmitAnswerResponse(
         success=True,
         next_question=result.get("next_question"),
@@ -2145,15 +2004,13 @@ async def pause_step10_analysis(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10PauseResponse:
     """
-    Поставить самоанализ на паузу.
-    """
     service = Step10Service(current_context.session)
     result = await service.pause_analysis(
         user_id=current_context.user.id,
         analysis_date=payload.analysis_date
     )
     await current_context.session.commit()
-    
+
     if not result.get("success"):
         return Step10PauseResponse(
             success=False,
@@ -2163,7 +2020,7 @@ async def pause_step10_analysis(
             current_question=0,
             resume_info=""
         )
-    
+
     question_data = None
     if result.get("question_data"):
         qd = result["question_data"]
@@ -2172,7 +2029,7 @@ async def pause_step10_analysis(
             text=qd["text"],
             subtext=qd.get("subtext")
         )
-    
+
     return Step10PauseResponse(
         success=True,
         status=result.get("status", "PAUSED"),
@@ -2189,17 +2046,15 @@ async def get_step10_progress(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Optional[Step10ProgressResponse]:
     """
-    Получить текущий прогресс самоанализа.
-    """
     service = Step10Service(current_context.session)
     result = await service.get_analysis_progress(
         user_id=current_context.user.id,
         analysis_date=analysis_date
     )
-    
+
     if not result:
         return None
-    
+
     question_data = None
     if result.get("question_data"):
         qd = result["question_data"]
@@ -2208,7 +2063,7 @@ async def get_step10_progress(
             text=qd["text"],
             subtext=qd.get("subtext")
         )
-    
+
     return Step10ProgressResponse(
         analysis_id=result["analysis_id"],
         status=result["status"],
@@ -2220,7 +2075,6 @@ async def get_step10_progress(
     )
 
 
-# --- Gratitude Endpoints ---
 
 @app.post("/gratitudes", response_model=GratitudeItem)
 async def create_gratitude(
@@ -2233,7 +2087,7 @@ async def create_gratitude(
         user_id=current_context.user.id,
         text=payload.text
     )
-    
+
     return GratitudeItem(
         id=gratitude.id,
         text=gratitude.text,
@@ -2249,16 +2103,16 @@ async def get_gratitudes(
 ) -> GratitudeListResponse:
     """Получить список благодарностей пользователя"""
     repo = GratitudeRepository(current_context.session)
-    
+
     offset = (page - 1) * page_size
     gratitudes = await repo.get_user_gratitudes(
         user_id=current_context.user.id,
         limit=page_size,
         offset=offset
     )
-    
+
     total = await repo.get_count(current_context.user.id)
-    
+
     items = [
         GratitudeItem(
             id=g.id,
@@ -2267,7 +2121,7 @@ async def get_gratitudes(
         )
         for g in gratitudes
     ]
-    
+
     return GratitudeListResponse(
         gratitudes=items,
         total=total,

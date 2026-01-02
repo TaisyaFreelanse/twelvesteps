@@ -54,8 +54,7 @@ class AnswerTemplateRepository:
         template = await self.get_template_by_id(template_id)
         if not template:
             return None
-        
-        # Only custom templates owned by user can be updated
+
         if template.template_type != TemplateType.CUSTOM or template.user_id != user_id:
             return None
 
@@ -73,11 +72,10 @@ class AnswerTemplateRepository:
         template = await self.get_template_by_id(template_id)
         if not template:
             return False
-        
-        # Only custom templates owned by user can be deleted
+
         if template.template_type != TemplateType.CUSTOM or template.user_id != user_id:
             return False
-        
+
         await self.db.delete(template)
         await self.db.flush()
         return True

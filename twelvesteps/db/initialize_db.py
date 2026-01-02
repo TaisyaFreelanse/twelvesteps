@@ -1,12 +1,4 @@
 """
-Initialize database with steps and questions from the 12-step program.
-Updated to include all questions from the source txt files.
-
-This script:
-1. Creates tables if they don't exist
-2. Updates existing steps/questions or creates new ones
-3. Is safe to run multiple times (idempotent)
-"""
 import asyncio
 import sys
 import os
@@ -14,11 +6,9 @@ import os
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Исправленные импорты: указываем папку db
 from db.database import engine, async_session_factory, Base
 from db.models import Step, Question
 
-# Полные данные шагов и вопросов из txt файлов клиента
 DATA = [
     {
         "step": {
@@ -608,33 +598,28 @@ DATA = [
 
 async def initialize_db_and_seed():
     """Initialize or update database with steps and questions."""
-    
-    # Создание таблиц (если они еще не созданы)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         print("Таблицы проверены/созданы.")
 
-    # Вставка или обновление данных
     async with async_session_factory() as session:
         async with session.begin():
             for item in DATA:
                 step_data = item["step"]
                 step_index = step_data["index"]
-                
-                # Проверяем, существует ли шаг
+
                 result = await session.execute(
                     select(Step).where(Step.index == step_index)
                 )
                 existing_step = result.scalar_one_or_none()
-                
+
                 if existing_step:
-                    # Обновляем существующий шаг
                     existing_step.title = step_data.get("title")
                     existing_step.description = step_data.get("description")
                     step = existing_step
                     print(f"  📝 Обновлен шаг {step_index}")
                 else:
-                    # Создаем новый шаг
                     step = Step(
                         index=step_index,
                         title=step_data.get("title"),
@@ -643,29 +628,23 @@ async def initialize_db_and_seed():
                     session.add(step)
                     await session.flush()
                     print(f"  ✨ Создан шаг {step_index}")
-                
-                # Получаем существующие вопросы для этого шага
+
                 result = await session.execute(
                     select(Question).where(Question.step_id == step.id)
                 )
                 existing_questions = {q.text: q for q in result.scalars().all()}
-                
-                # Обновляем или создаем вопросы
+
                 new_questions = step_data["questions"]
                 new_questions_set = set(new_questions)
                 existing_questions_set = set(existing_questions.keys())
-                
-                # Для всех шагов (1-12) пересоздаем все вопросы, чтобы сохранить правильный порядок
-                # ВНИМАНИЕ: Это удалит все ответы пользователей на вопросы этих шагов
+
                 if step_index == 1 or step_index == 2 or step_index == 3 or step_index == 4 or step_index == 5 or step_index == 6 or step_index == 7 or step_index == 8 or step_index == 9 or step_index == 10 or step_index == 11 or step_index == 12:
                     from sqlalchemy import delete
-                    # Удаляем все существующие вопросы для этого шага
                     await session.execute(
                         delete(Question).where(Question.step_id == step.id)
                     )
                     print(f"     ⚠️ Удалены все существующие вопросы (и ответы пользователей) для Шага {step_index}")
-                    
-                    # Добавляем все вопросы заново в правильном порядке
+
                     for q_text in new_questions:
                         new_question = Question(
                             text=q_text,
@@ -674,7 +653,6 @@ async def initialize_db_and_seed():
                         session.add(new_question)
                     print(f"     ✅ Добавлено {len(new_questions)} вопросов для Шага {step_index} в правильном порядке")
                 else:
-                    # Для остальных шагов: умное обновление (добавление/удаление только изменений)
                     from sqlalchemy import delete
                     questions_to_remove = existing_questions_set - new_questions_set
                     if questions_to_remove:
@@ -683,8 +661,7 @@ async def initialize_db_and_seed():
                             delete(Question).where(Question.id.in_(question_ids_to_remove))
                         )
                         print(f"     Удалено {len(questions_to_remove)} старых вопросов")
-                    
-                    # Добавляем новые вопросы в конец (порядок для них не критичен, т.к. они новые)
+
                     questions_to_add = new_questions_set - existing_questions_set
                     for q_text in new_questions:
                         if q_text in questions_to_add:
@@ -693,34 +670,32 @@ async def initialize_db_and_seed():
                                 step_id=step.id
                             )
                             session.add(new_question)
-                    
+
                     if questions_to_add:
                         print(f"     Добавлено {len(questions_to_add)} новых вопросов")
-                    
+
                     if len(existing_questions) != len(new_questions) or questions_to_remove or questions_to_add:
                         print(f"     Всего вопросов в шаге {step_index}: {len(new_questions)}")
-        
+
         print("✅ Шаги и вопросы успешно инициализированы/обновлены.")
 
 
 async def force_update_all():
     """Force update all steps and questions (deletes existing and recreates)."""
     from sqlalchemy import delete
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     async with async_session_factory() as session:
         async with session.begin():
-            # Delete all existing questions and steps
             await session.execute(delete(Question))
             await session.execute(delete(Step))
             print("🗑️ Удалены существующие шаги и вопросы")
-            
-            # Insert fresh data
+
             for item in DATA:
                 step_data = item["step"]
-                
+
                 step = Step(
                     index=step_data["index"],
                     title=step_data.get("title"),
@@ -728,21 +703,20 @@ async def force_update_all():
                 )
                 session.add(step)
                 await session.flush()
-                
+
                 for q_text in step_data["questions"]:
                     question = Question(text=q_text, step_id=step.id)
                     session.add(question)
-                
+
                 print(f"  ✅ Создан шаг {step_data['index']} с {len(step_data['questions'])} вопросами")
-        
+
         print("🎉 Все шаги и вопросы пересозданы!")
 
 
 if __name__ == "__main__":
-    # Убедимся, что путь корректен при запуске
     current_path = os.getcwd()
     sys.path.append(current_path)
-    
+
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--force":
         asyncio.run(force_update_all())

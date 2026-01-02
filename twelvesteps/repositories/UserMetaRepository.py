@@ -8,13 +8,13 @@ from db.models import UserMeta
 class UserMetaRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_user_id(self, user_id: int) -> Optional[UserMeta]:
         """Get UserMeta for a user (one-to-one relationship)"""
         stmt = select(UserMeta).where(UserMeta.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def create_or_update(
         self,
         user_id: int,
@@ -26,7 +26,7 @@ class UserMetaRepository:
     ) -> UserMeta:
         """Create or update UserMeta for a user"""
         existing = await self.get_by_user_id(user_id)
-        
+
         if existing:
             if metasloy_signals is not None:
                 existing.metasloy_signals = metasloy_signals

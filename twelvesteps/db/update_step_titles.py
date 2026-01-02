@@ -8,14 +8,13 @@ from db.models import Step
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:password@postgres:5432/twelvesteps")
 
-# Названия шагов согласно программе 12 шагов (АН/АА)
 STEP_TITLES = {
     1: {
         "title": "Признание бессилия",
         "description": "Мы признали своё бессилие перед зависимостью, признали, что наша жизнь стала неуправляемой."
     },
     2: {
-        "title": "Вера в восстановление", 
+        "title": "Вера в восстановление",
         "description": "Мы пришли к убеждению, что только Сила, более могущественная, чем мы сами, может вернуть нам здравомыслие."
     },
     3: {
@@ -68,17 +67,16 @@ async def update_step_titles():
 
     async with async_session() as session:
         async with session.begin():
-            # Get all steps
             result = await session.execute(select(Step).order_by(Step.index))
             steps = result.scalars().all()
-            
+
             if not steps:
                 print("❌ No steps found in database!")
                 return
-            
+
             print("📝 Обновление названий шагов...")
             print("=" * 60)
-            
+
             updated_count = 0
             for step in steps:
                 if step.index in STEP_TITLES:
@@ -87,7 +85,7 @@ async def update_step_titles():
                     step.description = step_info["description"]
                     updated_count += 1
                     print(f"✅ Шаг {step.index}: {step_info['title']}")
-            
+
             await session.commit()
             print("=" * 60)
             print(f"✅ Обновлено {updated_count} шагов!")
@@ -101,7 +99,7 @@ async def show_steps():
     async with async_session() as session:
         result = await session.execute(select(Step).order_by(Step.index))
         steps = result.scalars().all()
-        
+
         print("\n📊 Текущие шаги:")
         print("=" * 70)
         for step in steps:

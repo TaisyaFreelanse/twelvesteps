@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import aiohttp
 from pydantic import BaseModel
 
-# Ensure these are defined in your bot/config.py
 from bot.config import BACKEND_API_BASE, BACKEND_CHAT_URL
 
 logger = logging.getLogger(__name__)
@@ -77,43 +76,32 @@ class BackendClient:
     async def get_status(self, access_token: str) -> Dict[str, Any]:
         return await self._request("GET", "/status", token=access_token)
 
-    # --- Steps Functionality ---
 
     async def get_next_step(self, access_token: str) -> Dict[str, Any]:
-        """
-        Fetches the next question in the step flow.
-        Returns: Dict with keys 'message' (str) and 'is_completed' (bool).
         """
         return await self._request("GET", "/steps/next", token=access_token)
 
     async def submit_step_answer(
-        self, 
-        access_token: str, 
-        text: str, 
+        self,
+        access_token: str,
+        text: str,
         is_template_format: bool = False,
         skip_validation: bool = False
     ) -> Tuple[bool, Optional[str]]:
         """
-        Attempts to submit an answer for the current active step.
-        Returns: (success: bool, error_message: Optional[str])
-        - (True, None) on success
-        - (False, error_message) if validation failed or no active question
-        Raises: aiohttp.ClientResponseError for other errors (500, 401, etc).
-        """
         url = f"{self.base_url}/steps/answer"
         headers = {"Authorization": f"Bearer {access_token}"}
         payload = {
-            "text": text, 
+            "text": text,
             "is_template_format": is_template_format,
             "skip_validation": skip_validation
         }
-        
+
         async with aiohttp.ClientSession(timeout=self.timeout) as session:
             async with session.post(url, headers=headers, json=payload) as response:
                 if response.status == 200:
                     return True, None
                 elif response.status == 400:
-                    # Get error details from response
                     try:
                         error_data = await response.json()
                         error_message = error_data.get("detail", "Ошибка при сохранении ответа")
@@ -127,7 +115,7 @@ class BackendClient:
     async def get_current_step_info(self, access_token: str) -> Dict[str, Any]:
         """Get current step information with progress indicators"""
         return await self._request("GET", "/steps/current", token=access_token)
-    
+
     async def get_step_detail(self, access_token: str, step_id: int) -> Dict[str, Any]:
         """Get detailed information about a step"""
         return await self._request("GET", f"/steps/{step_id}/detail", token=access_token)
@@ -155,15 +143,15 @@ class BackendClient:
     async def get_current_question_id(self, access_token: str) -> Dict[str, Any]:
         """Get question_id from active Tail"""
         return await self._request("GET", "/steps/current/question-id", token=access_token)
-    
+
     async def get_last_answered_question_id(self, access_token: str) -> Dict[str, Any]:
         """Get question_id from the last answered question"""
         return await self._request("GET", "/steps/last-answered/question-id", token=access_token)
-    
+
     async def get_previous_answer(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Get previous answer for a question"""
         return await self._request("GET", f"/steps/question/{question_id}/previous", token=access_token)
-    
+
     async def get_example_answers(self, access_token: str, question_id: int, limit: int = 5) -> Dict[str, Any]:
         """Get example answers for a question from other users"""
         return await self._request("GET", f"/steps/question/{question_id}/examples?limit={limit}", token=access_token)
@@ -171,27 +159,26 @@ class BackendClient:
     async def switch_to_question(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Switch to a specific question"""
         return await self._request("POST", "/steps/switch-question", token=access_token, json={"question_id": question_id})
-    
+
     async def get_steps_list(self, access_token: str) -> Dict[str, Any]:
         """Get list of all steps"""
         return await self._request("GET", "/steps/list", token=access_token)
-    
+
     async def switch_step(self, access_token: str, step_id: int) -> Dict[str, Any]:
         """Switch to a specific step"""
         return await self._request("POST", "/steps/switch", token=access_token, json={"step_id": step_id})
-    
+
     async def get_question_detail(self, access_token: str, question_id: int) -> Dict[str, Any]:
         """Get question details"""
         return await self._request("GET", f"/steps/question/{question_id}", token=access_token)
 
-    # --- Steps Settings Functionality ---
 
     async def get_steps_settings(self, access_token: str) -> Dict[str, Any]:
         """Get current steps settings"""
         return await self._request("GET", "/steps/settings", token=access_token)
 
     async def update_steps_settings(
-        self, 
+        self,
         access_token: str,
         active_template_id: Optional[int] = None,
         reminders_enabled: Optional[bool] = None,
@@ -208,10 +195,9 @@ class BackendClient:
             payload["reminder_time"] = reminder_time
         if reminder_days is not None:
             payload["reminder_days"] = reminder_days
-        
+
         return await self._request("PUT", "/steps/settings", token=access_token, json=payload)
 
-    # --- SOS Functionality ---
 
     async def get_profile_sections(self, access_token: str) -> Dict[str, Any]:
         """Get all profile sections"""
@@ -220,7 +206,7 @@ class BackendClient:
     async def get_section_detail(self, access_token: str, section_id: int) -> Dict[str, Any]:
         """Get section details with questions"""
         return await self._request("GET", f"/profile/sections/{section_id}", token=access_token)
-    
+
     async def get_user_answers_for_section(self, access_token: str, section_id: int) -> Dict[str, Any]:
         """Get user's answers for questions in a section"""
         return await self._request("GET", f"/profile/sections/{section_id}/answers", token=access_token)
@@ -244,7 +230,7 @@ class BackendClient:
         return await self._request(
             "POST", f"/profile/sections/{section_id}/free-text", token=access_token, json=payload
         )
-    
+
     async def submit_general_free_text(
         self, access_token: str, text: str
     ) -> Dict[str, Any]:
@@ -253,7 +239,7 @@ class BackendClient:
         return await self._request(
             "POST", "/profile/free-text", token=access_token, json=payload
         )
-    
+
     async def get_free_text_history(
         self, access_token: str
     ) -> Dict[str, Any]:
@@ -261,7 +247,7 @@ class BackendClient:
         return await self._request(
             "GET", "/profile/free-text/history", token=access_token
         )
-    
+
     async def get_section_history(
         self, access_token: str, section_id: int, limit: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -270,7 +256,7 @@ class BackendClient:
         if limit:
             url += f"?limit={limit}"
         return await self._request("GET", url, token=access_token)
-    
+
     async def create_section_data_entry(
         self,
         access_token: str,
@@ -294,7 +280,7 @@ class BackendClient:
         return await self._request(
             "POST", f"/profile/sections/{section_id}/data", token=access_token, json=payload
         )
-    
+
     async def update_section_data_entry(
         self,
         access_token: str,
@@ -320,11 +306,11 @@ class BackendClient:
             payload["is_core_personality"] = is_core_personality
         if tags is not None:
             payload["tags"] = tags
-        
+
         return await self._request(
             "PUT", f"/profile/section-data/{data_id}", token=access_token, json=payload
         )
-    
+
     async def delete_section_data_entry(
         self, access_token: str, data_id: int
     ) -> Dict[str, Any]:
@@ -370,7 +356,6 @@ class BackendClient:
             "DELETE", f"/profile/sections/{section_id}", token=access_token
         )
 
-    # --- Answer Template Functionality ---
 
     async def get_templates(self, access_token: str) -> Dict[str, Any]:
         """Get all available templates"""
@@ -381,7 +366,6 @@ class BackendClient:
         payload = {"template_id": template_id}
         return await self._request("PATCH", "/me/template", token=access_token, json=payload)
 
-    # --- SOS Chat Functionality ---
 
     async def get_sos_message(self, telegram_id: int) -> str:
         """Get SOS help message (legacy method)"""
@@ -389,8 +373,8 @@ class BackendClient:
         return response.get("reply", "")
 
     async def sos_chat(
-        self, 
-        access_token: str, 
+        self,
+        access_token: str,
         help_type: Optional[str] = None,
         custom_text: Optional[str] = None,
         message: Optional[str] = None,
@@ -403,14 +387,12 @@ class BackendClient:
             "message": message,
             "conversation_history": conversation_history or []
         }
-        # For examples, use extended timeout (180 seconds) to ensure LLM response
-        # For other types, use extended timeout as well to be safe
         extended_timeout = aiohttp.ClientTimeout(total=180)
         url = f"{self.base_url}/sos/chat"
         headers: Dict[str, str] = {}
         if access_token:
             headers["Authorization"] = f"Bearer {access_token}"
-        
+
         async with aiohttp.ClientSession(timeout=extended_timeout) as session:
             async with session.post(url, headers=headers, json=payload) as response:
                 response.raise_for_status()
@@ -418,22 +400,16 @@ class BackendClient:
 
     async def get_sos_message(self, telegram_id: int | str) -> str:
         """
-        Calls POST /sos to get a helpful hint based on user context.
-        """
         payload = {"telegram_id": str(telegram_id)}
-        # We use _request to handle base_url, json headers, and error raising automatically
         data = await self._request("POST", "/sos", json=payload)
         return data["reply"]
 
-    # --- Thanks and Day Commands ---
 
     async def thanks(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
         """
-        Calls POST /thanks to get a support and motivation message.
-        """
         payload = {"telegram_id": str(telegram_id), "debug": debug}
         data = await self._request("POST", "/thanks", json=payload)
-        
+
         reply = data.get("reply", "")
         log_data = data.get("log")
         log = None
@@ -442,16 +418,14 @@ class BackendClient:
                 log = Log(**log_data)
             except Exception:
                 pass
-        
+
         return ChatResponse(reply=reply, log=log)
 
     async def day(self, telegram_id: int | str, debug: bool = False) -> ChatResponse:
         """
-        Calls POST /day to get an analysis and reflection message.
-        """
         payload = {"telegram_id": str(telegram_id), "debug": debug}
         data = await self._request("POST", "/day", json=payload)
-        
+
         reply = data.get("reply", "")
         log_data = data.get("log")
         log = None
@@ -460,20 +434,19 @@ class BackendClient:
                 log = Log(**log_data)
             except Exception:
                 pass
-        
+
         return ChatResponse(reply=reply, log=log)
-    
-    # --- Gratitude Methods ---
-    
+
+
     async def create_gratitude(self, access_token: str, text: str) -> dict:
         """Создать новую благодарность"""
         return await self._request(
-            "POST", 
-            "/gratitudes", 
-            token=access_token, 
+            "POST",
+            "/gratitudes",
+            token=access_token,
             json={"text": text}
         )
-    
+
     async def get_gratitudes(self, access_token: str, page: int = 1, page_size: int = 20) -> dict:
         """Получить список благодарностей"""
         return await self._request(
@@ -481,11 +454,8 @@ class BackendClient:
             f"/gratitudes?page={page}&page_size={page_size}",
             token=access_token
         )
-    
-    # ================================================================
-    # STEP 10 DAILY ANALYSIS METHODS
-    # ================================================================
-    
+
+
     async def start_step10_analysis(
         self, token: str, analysis_date: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -494,7 +464,7 @@ class BackendClient:
             payload = {}
             if analysis_date:
                 payload["analysis_date"] = analysis_date
-            
+
             data = await self._request(
                 "POST",
                 "/step10/start",
@@ -505,7 +475,7 @@ class BackendClient:
         except Exception as e:
             logger.error(f"Failed to start step10 analysis: {e}")
             return None
-    
+
     async def submit_step10_answer(
         self, token: str, question_number: int, answer: str, analysis_date: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -517,7 +487,7 @@ class BackendClient:
             }
             if analysis_date:
                 payload["analysis_date"] = analysis_date
-            
+
             data = await self._request(
                 "POST",
                 "/step10/submit",
@@ -528,7 +498,7 @@ class BackendClient:
         except Exception as e:
             logger.error(f"Failed to submit step10 answer: {e}")
             return None
-    
+
     async def pause_step10_analysis(
         self, token: str, analysis_date: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -537,7 +507,7 @@ class BackendClient:
             payload = {}
             if analysis_date:
                 payload["analysis_date"] = analysis_date
-            
+
             data = await self._request(
                 "POST",
                 "/step10/pause",
@@ -548,7 +518,7 @@ class BackendClient:
         except Exception as e:
             logger.error(f"Failed to pause step10 analysis: {e}")
             return None
-    
+
     async def get_step10_progress(
         self, token: str, analysis_date: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -557,7 +527,7 @@ class BackendClient:
             params = {}
             if analysis_date:
                 params["analysis_date"] = analysis_date
-            
+
             data = await self._request(
                 "GET",
                 "/step10/progress",
@@ -568,17 +538,11 @@ class BackendClient:
         except Exception as e:
             logger.error(f"Failed to get step10 progress: {e}")
             return None
-    
-    # ================================================================
-    # TEMPLATE PROGRESS METHODS (FSM для пошагового заполнения)
-    # ================================================================
-    
+
+
     async def start_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
-        Начать или продолжить заполнение шаблона.
-        Returns dict with progress info.
         """
         try:
             data = await self._request(
@@ -591,13 +555,10 @@ class BackendClient:
         except Exception as exc:
             logger.exception("Failed to start template progress: %s", exc)
             return None
-    
+
     async def submit_template_field(
         self, token: str, step_id: int, question_id: int, value: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        Сохранить значение поля шаблона и получить следующее.
-        Returns dict with next field info.
         """
         try:
             data = await self._request(
@@ -610,12 +571,10 @@ class BackendClient:
         except Exception as exc:
             logger.exception("Failed to submit template field: %s", exc)
             return None
-    
+
     async def pause_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
-        Поставить заполнение шаблона на паузу.
         """
         try:
             data = await self._request(
@@ -628,12 +587,10 @@ class BackendClient:
         except Exception as exc:
             logger.exception("Failed to pause template progress: %s", exc)
             return None
-    
+
     async def get_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
-        Получить текущий прогресс заполнения шаблона.
         """
         try:
             data = await self._request(
@@ -649,12 +606,10 @@ class BackendClient:
         except Exception as exc:
             logger.exception("Failed to get template progress: %s", exc)
             return None
-    
+
     async def cancel_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> bool:
-        """
-        Отменить заполнение шаблона.
         """
         try:
             await self._request(
@@ -666,10 +621,8 @@ class BackendClient:
         except Exception as exc:
             logger.exception("Failed to cancel template progress: %s", exc)
             return False
-    
+
     async def get_template_fields_info(self, token: str) -> Optional[Dict[str, Any]]:
-        """
-        Получить информацию о полях шаблона.
         """
         try:
             data = await self._request(
@@ -683,9 +636,6 @@ class BackendClient:
             return None
 
 
-# ---------------------------------------------------------------------------
-# GLOBAL STATE & HELPERS
-# ---------------------------------------------------------------------------
 
 BACKEND_CLIENT = BackendClient(base_url=BACKEND_API_BASE)
 TOKEN_STORE: Dict[str, str] = {}
@@ -708,7 +658,7 @@ async def get_or_fetch_token(
             username=username,
             first_name=first_name,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Unable to fetch token for %s: %s", key, exc)
         return None
     TOKEN_STORE[key] = token
@@ -739,14 +689,13 @@ async def update_user_profile(
             program_experience=program_experience,
             sobriety_date=sobriety_date,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("Failed to update profile for %s: %s", key, exc)
         return
     if updated:
         USER_CACHE[key] = updated
 
 
-# --- Step Logic Helpers ---
 
 async def process_step_message(
     telegram_id: int,
@@ -756,33 +705,19 @@ async def process_step_message(
     skip_validation: bool = False
 ) -> Dict[str, Any]:
     """
-    Logic:
-    1. Try to submit the user's text as an answer to an active step.
-    2. If successful: Fetch and return the NEXT question/status.
-    3. If validation failed: Return error message.
-    4. If no active question: Return None (caller should use legacy chat).
-    
-    Returns:
-    - {"message": ..., "is_completed": ...} on success (next question)
-    - {"error": True, "message": ...} on validation error
-    - None if no active step question
-    """
     token = await get_or_fetch_token(telegram_id, username, first_name)
     if not token:
         return None
 
-    # 1. Try to submit answer (default is_template_format=False for plain text)
     success, error_message = await BACKEND_CLIENT.submit_step_answer(
         token, text, is_template_format=False, skip_validation=skip_validation
     )
 
     if success:
-        # 2. If it was an answer, get the immediate next prompt
         return await BACKEND_CLIENT.get_next_step(token)
     elif error_message:
-        # Validation failed - return error
         return {"error": True, "message": error_message}
-    
+
     return None
 
 
@@ -792,16 +727,12 @@ async def get_current_step_question(
     first_name: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Just fetches the current pending question without submitting an answer.
-    Useful for commands like /steps or /continue_steps.
-    """
     token = await get_or_fetch_token(telegram_id, username, first_name)
     if not token:
         return None
     return await BACKEND_CLIENT.get_next_step(token)
 
 
-# --- Chat & Models (Legacy/Direct Chat) ---
 
 class Log(BaseModel):
     classification_result: str
@@ -817,21 +748,15 @@ class ChatResponse(BaseModel):
 
 async def call_legacy_chat(telegram_id: int, text: str, debug: bool) -> Union[str, ChatResponse]:
     """
-    Calls the dedicated chat endpoint (separate from main API if configured).
-    Chat processing involves multiple LLM calls and can take 30-60 seconds.
-    """
     payload = {"telegram_id": str(telegram_id), "message": text, "debug": debug}
-    # Increased timeout for chat: classification + embedding + semantic search + response generation
     timeout = aiohttp.ClientTimeout(total=120)
 
-    # Note: Using a fresh session here in case BACKEND_CHAT_URL is different base
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(BACKEND_CHAT_URL, json=payload) as response:
             response.raise_for_status()
             try:
                 data = await response.json()
             except aiohttp.ContentTypeError:
-                # If backend sent raw text instead of JSON
                 raw = await response.text()
                 return ChatResponse(reply=raw, log=None)
 
@@ -839,23 +764,20 @@ async def call_legacy_chat(telegram_id: int, text: str, debug: bool) -> Union[st
     log = None
 
     if isinstance(data, dict):
-        # Look for standard text fields
         for key in ("reply", "response", "message", "text", "answer"):
             value = data.get(key)
             if isinstance(value, str) and value.strip():
                 reply = value
                 break
 
-        # Fallback: dump the whole dict
         if reply is None:
             reply = json.dumps(data, ensure_ascii=False, indent=2)
 
-        # Extract log if present
         if "log" in data and data["log"]:
             try:
                 log = Log(**data["log"])
             except Exception:
-                pass  # Ignore log parsing errors
+                pass
 
         return ChatResponse(reply=reply, log=log)
 

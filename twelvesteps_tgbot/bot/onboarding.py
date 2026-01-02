@@ -10,7 +10,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, ReplyKeyboardRemove
 
-# Imports from your backend
 from bot.backend import update_user_profile, call_legacy_chat
 from bot.config import (
     build_experience_markup,
@@ -28,22 +27,18 @@ class OnboardingStates(StatesGroup):
     sobriety_date = State()
     self_description = State()
 
-# --- CONFIGURATION ---
 
-# 1. Valid values that the Database accepts
 VALID_CODES = {"NEWBIE", "SOME_EXPERIENCE", "LONG_TERM"}
 
-# 2. Mapping User Input (Russian) -> Database Value (English)
-# Keys must be UPPERCASE for case-insensitive matching
 EXPERIENCE_MAPPING = {
     "НОВИЧОК": "NEWBIE",
     "NEWBIE": "NEWBIE",
-    
+
     "ЕСТЬ НЕМНОГО ОПЫТА": "SOME_EXPERIENCE",
     "ЕСТЬ ОПЫТ": "SOME_EXPERIENCE",
     "УЖЕ В ПРОГРАММЕ": "SOME_EXPERIENCE",
     "SOME_EXPERIENCE": "SOME_EXPERIENCE",
-    
+
     "БЫВАЛЫЙ": "LONG_TERM",
     "ПРОХОДИЛ ШАГИ": "LONG_TERM",
     "СПОНСОР": "LONG_TERM",
@@ -56,14 +51,14 @@ async def handle_display_name(message: Message, state: FSMContext) -> None:
     if not text or text.startswith("/"):
         await message.answer("Пожалуйста, напиши имя, под которым мне к тебе обращаться.")
         return
-    
+
     await update_user_profile(
         message.from_user.id,
         message.from_user.username,
         message.from_user.first_name,
         display_name=text,
     )
-    
+
     await state.set_state(OnboardingStates.program_experience)
     await message.answer(
         "Отлично! Какой у тебя опыт работы с программой?",
@@ -72,15 +67,12 @@ async def handle_display_name(message: Message, state: FSMContext) -> None:
 
 
 async def handle_experience(message: Message, state: FSMContext) -> None:
-    # Debug print to see what exactly is coming in
     raw_text = message.text.strip()
     normalized_text = raw_text.upper()
     print(f"[Onboarding Debug] Received Experience: '{raw_text}' (Normalized: '{normalized_text}')")
 
-    # 1. Try to map the text to a valid code
     selected_code = EXPERIENCE_MAPPING.get(normalized_text)
 
-    # 2. Validation: Ensure we found a code and it is valid
     if not selected_code or selected_code not in VALID_CODES:
         await message.answer(
             f"Я не понял ответ '{raw_text}'. Пожалуйста, выбери один из вариантов на клавиатуре.",
@@ -88,7 +80,6 @@ async def handle_experience(message: Message, state: FSMContext) -> None:
         )
         return
 
-    # 3. Save to Backend
     try:
         await update_user_profile(
             message.from_user.id,
@@ -98,9 +89,7 @@ async def handle_experience(message: Message, state: FSMContext) -> None:
         )
     except Exception as e:
         logger.error(f"Failed to update experience: {e}")
-        # Continue anyway to not block the user
 
-    # 4. Move to Next Step
     await state.set_state(OnboardingStates.sobriety_date)
     await message.answer(
         "Хочешь ли ты рассказать свою дату трезвости? Отправь её в формате YYYY-MM-DD или /skip.",
@@ -111,7 +100,7 @@ async def handle_experience(message: Message, state: FSMContext) -> None:
 async def handle_sobriety(message: Message, state: FSMContext) -> None:
     text = message.text.strip()
     sobriety_date = None
-    
+
     if text.lower() not in ("/skip", "skip"):
         try:
             parsed = datetime.datetime.strptime(text, "%Y-%m-%d")
@@ -130,9 +119,8 @@ async def handle_sobriety(message: Message, state: FSMContext) -> None:
             sobriety_date=sobriety_date,
         )
 
-    # Move to Analyzer Step
     await state.set_state(OnboardingStates.self_description)
-    
+
     await message.answer(
         "Принято.\n\n"
         "<b>Последний шаг:</b>\n"
@@ -146,36 +134,26 @@ async def handle_sobriety(message: Message, state: FSMContext) -> None:
 
 async def handle_self_description(message: Message, state: FSMContext) -> None:
     """
-    Takes the user's bio, sends it to the backend chatbot.
-    Triggers: Classify -> Analyze Profile -> Update DB -> Reply.
-    
-    Validates input to detect questions and redirect user back to registration context.
-    """
     text = message.text.strip()
-    
-    # Validate input: check if user is asking a question instead of describing themselves
+
     if is_question(text):
-        # User asked a question - respond briefly and return to registration context
         await message.answer(
             "Это кратко о моих функциях. А теперь, пожалуйста, расскажи о себе, "
             "чтобы я мог лучше тебя понимать.\n\n"
             "Как ты себя чувствуешь? Что тебя беспокоит? Или просто пару слов о своей истории.",
             parse_mode="HTML"
         )
-        # Stay in self_description state to request data again
         return
-    
-    # Input is valid - proceed with profile setup
+
     processing_msg = await message.answer("Настраиваю твой профиль...")
 
     try:
-        # Send to backend as a regular message to trigger the Analyzer
         backend_reply = await call_legacy_chat(
             telegram_id=message.from_user.id,
             text=text,
             debug=False
         )
-        
+
         await processing_msg.delete()
         await state.clear()
 
@@ -183,7 +161,7 @@ async def handle_self_description(message: Message, state: FSMContext) -> None:
             await message.answer(backend_reply.reply, reply_markup=build_main_menu_markup())
         else:
             await message.answer(
-                "Спасибо! Я запомнил всё. Можем начинать общение.", 
+                "Спасибо! Я запомнил всё. Можем начинать общение.",
                 reply_markup=build_main_menu_markup()
             )
 
@@ -194,13 +172,13 @@ async def handle_self_description(message: Message, state: FSMContext) -> None:
             await processing_msg.delete()
         except:
             pass
-        
+
         error_text = (
             "❌ Произошла ошибка при настройке профиля.\n\n"
             "Профиль может быть частично сохранён, но сервер не ответил.\n\n"
             "Хочешь начать заново?"
         )
-        
+
         await message.answer(
             error_text,
             reply_markup=build_error_markup()
@@ -212,4 +190,4 @@ def register_onboarding_handlers(dp: Dispatcher) -> None:
     dp.message(OnboardingStates.display_name, F.text)(handle_display_name)
     dp.message(OnboardingStates.program_experience, F.text)(handle_experience)
     dp.message(OnboardingStates.sobriety_date, F.text)(handle_sobriety)
-    dp.message(OnboardingStates.self_description, F.text)(handle_self_description)  
+    dp.message(OnboardingStates.self_description, F.text)(handle_self_description)

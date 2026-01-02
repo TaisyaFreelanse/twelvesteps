@@ -9,13 +9,11 @@ from llm.provider import Provider
 from openai import AsyncOpenAI
 from repositories import PromptRepository
 
-# --- New Pydantic Models for Analysis ---
 class ProfileAnalysis(BaseModel):
     update_needed: bool = Field(..., description="True if the user message contains new psychological/identity info")
     extracted_info: Optional[str] = Field(None, description="The specific new details extracted")
     reason: Optional[str] = Field(None, description="Why the update is needed")
 
-# --- Existing Models ---
 class Part(BaseModel):
     part: str
     blocks: List[str]
@@ -69,8 +67,7 @@ class OpenAI(Provider):
             self._format_message("user", message)
         ]
         return [m for m in messages if m and m["content"].strip()]
-    
-    # --- NEW: Helper for Profile Tasks ---
+
     def _format_profile_task(self, system_instruction: str, input_data: str) -> list[dict]:
         return [
             self._format_message("system", system_instruction),
@@ -81,13 +78,10 @@ class OpenAI(Provider):
     async def generate_sos_response(self, system_prompt: str, question: str, personalization: str) -> str:
         config = await self.load_config("./llm/configs/openai_dynamic.json")
         """
-        Generates an example answer based on the SOS context.
-        """
-        # Construct the messages payload
         messages = [
             {"role": "system", "content": system_prompt},
             {
-                "role": "user", 
+                "role": "user",
                 "content": (
                     f"Персонализация пользователя:\n{personalization}\n\n"
                     f"Последний вопрос бота:\n{question}\n\n"
@@ -104,42 +98,13 @@ class OpenAI(Provider):
             )
 
         return response.choices[0].message.content
-    
-    # --- NEW: Analyze Profile Function ---
-# --- FIXED FUNCTION: Profile Analyzer ---
+
     async def analyze_profile(self, context: Context) -> ProfileAnalysis:
         """
-        Determines if the user's message contains new information that requires 
-        updating their personalization profile.
-        """
         config = await self.load_config("./llm/configs/openai_dynamic.json")
-        
-        system_prompt = """
-        You are a Clinical Profile Analyst.
-        Compare the [CURRENT_PROFILE] with the [USER_MESSAGE].
-        
-        **Task:** 
-        Determine if the message contains NEW relevant information about:
-        1. Identity (Name, Age, Gender)
-        2. Addiction Details (Substance, History)
-        3. Status (Clean time, Relapse, Withdrawal symptoms)
-        4. Psychology (Triggers, Coping mechanisms, Emotional state)
-        
-        **Output Format:**
-        You MUST return a valid JSON object with exactly these fields:
-        {
-            "update_needed": true or false,
-            "extracted_info": "A concise text summary of the new findings (or null if false)",
-            "reason": "Short explanation of why this is relevant"
-        }
+
         """
 
-        user_input_block = f"""
-        [CURRENT_PROFILE]:
-        {context.assistant.personalized_prompt}
-
-        [USER_MESSAGE]:
-        {context.message}
         """
 
         messages = [
@@ -162,21 +127,13 @@ class OpenAI(Provider):
             return ProfileAnalysis(**data)
         except Exception as e:
             print(f"[OpenAI.analyze_profile] Error parsing analysis: {e} | Raw: {raw}")
-            # Fallback so the bot doesn't crash
             return ProfileAnalysis(update_needed=False, extracted_info=None, reason="Error parsing")
-        
-    # --- NEW: Update Prompt Function ---
+
     async def update_personalized_prompt(self, context: Context, new_info: str) -> str:
         config = await self.load_config("./llm/configs/openai_dynamic.json")
 
         system_prompt = await PromptRepository.load_update_prompt()
 
-        user_input_block = f"""
-        [OLD_PROFILE]:
-        {context.assistant.personalized_prompt}
-
-        [NEW_FINDINGS]:
-        {new_info}
         """
 
         messages = self._format_profile_task(system_prompt, user_input_block)
@@ -191,7 +148,6 @@ class OpenAI(Provider):
 
         return response.choices[0].message.content.strip()
 
-    # --- Existing Methods ---
 
     async def plan(self, messages: list[dict]) -> str:
         prompt = await PromptRepository.load_dynamic_prompt()
@@ -211,7 +167,7 @@ class OpenAI(Provider):
         config = await self.load_config("./llm/configs/openai_system.json")
 
         plan = await self.plan(messages=messages)
-        
+
         async with AsyncOpenAI() as client:
             response = await client.chat.completions.create(
                 model=config["model"],
@@ -224,7 +180,7 @@ class OpenAI(Provider):
     async def classify(self, content: str) -> ClassificationResult:
         config = await self.load_config("./llm/configs/openai_classify.json")
         prompt = await PromptRepository.load_classify_prompt()
-        
+
         messages = self._format_context_classification(prompt, content)
 
         async with AsyncOpenAI() as client:

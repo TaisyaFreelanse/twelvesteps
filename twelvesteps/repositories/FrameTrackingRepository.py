@@ -8,13 +8,13 @@ from db.models import FrameTracking
 class FrameTrackingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-    
+
     async def get_by_user_id(self, user_id: int) -> Optional[FrameTracking]:
         """Get FrameTracking for a user"""
         stmt = select(FrameTracking).where(FrameTracking.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalars().first()
-    
+
     async def create_or_update(
         self,
         user_id: int,
@@ -26,7 +26,7 @@ class FrameTrackingRepository:
     ) -> FrameTracking:
         """Create or update FrameTracking for a user"""
         existing = await self.get_by_user_id(user_id)
-        
+
         if existing:
             if confirmed is not None:
                 existing.confirmed = confirmed

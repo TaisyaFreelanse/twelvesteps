@@ -69,7 +69,7 @@ class FrameRepository:
         )
         result = await self.db.execute(query)
         return list(result.scalars().unique().all())
-    
+
     async def get_frames_by_ids(
         self,
         frame_ids: List[int],
@@ -77,7 +77,7 @@ class FrameRepository:
         """Get frames by their IDs."""
         if not frame_ids:
             return []
-        
+
         query = select(FrameModel).where(FrameModel.id.in_(frame_ids))
         result = await self.db.execute(query)
         return list(result.scalars().all())

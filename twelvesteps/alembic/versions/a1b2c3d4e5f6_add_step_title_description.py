@@ -1,9 +1,3 @@
-"""add step title and description
-
-Revision ID: a1b2c3d4e5f6
-Revises: 2d985e1a5f02
-Create Date: 2025-01-27 12:00:00.000000
-
 """
 from typing import Sequence, Union
 
@@ -11,7 +5,6 @@ from alembic import op
 import sqlalchemy as sa
 
 
-# revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f6'
 down_revision: Union[str, None] = '2d985e1a5f02'
 branch_labels: Union[str, Sequence[str], None] = None
@@ -19,15 +12,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add title and description columns to steps table
     from sqlalchemy import inspect
-    
-    # Check if columns already exist before adding them
+
     conn = op.get_bind()
     inspector = inspect(conn)
     existing_columns = [col['name'] for col in inspector.get_columns('steps')]
-    
-    # Add columns only if they don't exist
+
     if 'title' not in existing_columns:
         op.add_column('steps', sa.Column('title', sa.String(255), nullable=True))
     if 'description' not in existing_columns:
@@ -35,7 +25,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Remove title and description columns
     op.drop_column('steps', 'description')
     op.drop_column('steps', 'title')
 

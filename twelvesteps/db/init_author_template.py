@@ -8,24 +8,10 @@ from db.models import AnswerTemplate, TemplateType
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:password@postgres:5432/twelvesteps")
 
-# Структура авторского шаблона согласно Руководству.pdf (РАСШИРЕННАЯ ВЕРСИЯ)
-# Поддерживает множественные ситуации в одном ответе
-#
-# Формат:
-# - Дата, Вопрос
-# - СИТУАЦИЯ 1, 2, 3... (неограниченно)
-#   - Где (контекст)
-#   - Думаю (мысли)
-#   - Чувства до (минимум 3)
-#   - Действия (по факту)
-#   - Чувства здоровой части (после)
-#   - Пути выхода / следующий шаг
-# - ВЫВОД (общий)
 
 author_template_structure = {
-    "version": 2,  # Версия шаблона для обратной совместимости
-    
-    # Заголовок ответа
+    "version": 2,
+
     "header": {
         "date": {
             "label": "Дата",
@@ -38,11 +24,10 @@ author_template_structure = {
             "description": "Текст вопроса, на который отвечаешь",
             "order": 2,
             "type": "text",
-            "auto_fill": True  # Система заполнит автоматически
+            "auto_fill": True
         }
     },
-    
-    # Массив ситуаций (можно добавлять сколько угодно)
+
     "situations": {
         "label": "Ситуации",
         "description": "Можешь описать одну или несколько ситуаций",
@@ -95,8 +80,7 @@ author_template_structure = {
             }
         }
     },
-    
-    # Общий вывод по всем ситуациям
+
     "conclusion": {
         "label": "ВЫВОД",
         "description": "Общий вывод по всем ситуациям. Что понял(а)? Какие паттерны заметил(а)?",
@@ -104,8 +88,7 @@ author_template_structure = {
         "type": "text",
         "optional": True
     },
-    
-    # Дополнительные заметки
+
     "notes": {
         "label": "Что не попало",
         "description": "Что ещё важно, но не вошло в ситуации?",
@@ -115,7 +98,6 @@ author_template_structure = {
     }
 }
 
-# Пример заполненного ответа по новому шаблону (для документации)
 example_filled_answer = {
     "header": {
         "date": "2025-08-18",
@@ -159,13 +141,11 @@ async def main():
 
     async with async_session() as session:
         async with session.begin():
-            # Check if author template exists
             query = select(AnswerTemplate).where(AnswerTemplate.template_type == TemplateType.AUTHOR)
             result = await session.execute(query)
             existing_template = result.scalar_one_or_none()
-            
+
             if existing_template:
-                # Update existing template to new structure
                 print(f"Updating author template (ID={existing_template.id}) to version 2...")
                 existing_template.structure = author_template_structure
                 existing_template.name = "Авторский шаблон (множественные ситуации)"
@@ -173,8 +153,7 @@ async def main():
                 print("✅ Author template updated to version 2!")
                 print(f"   Now supports multiple situations per answer.")
                 return
-            
-            # Create author template
+
             print("Creating author template (version 2)...")
             new_template = AnswerTemplate(
                 id=1,

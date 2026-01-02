@@ -7,7 +7,6 @@ import os
 
 
 
-# Load environment variables from backend.env in parent directory
 import pathlib
 env_path = pathlib.Path(__file__).parent.parent.parent / "backend.env"
 load_dotenv(env_path)
@@ -30,8 +29,8 @@ engine = create_async_engine(
 
 
 async_session_factory = async_sessionmaker(
-    engine, 
-    class_ = AsyncSession, 
+    engine,
+    class_ = AsyncSession,
     expire_on_commit=False)
 
 

@@ -1,9 +1,3 @@
-"""add qa status
-
-Revision ID: g4a5b6c7d8e9
-Revises: f3a4b5c6d7e8
-Create Date: 2025-01-27 17:00:00.000000
-
 """
 from typing import Sequence, Union
 
@@ -12,7 +6,6 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-# revision identifiers, used by Alembic.
 revision: str = 'g4a5b6c7d8e9'
 down_revision: Union[str, None] = 'f3a4b5c6d7e8'
 branch_labels: Union[str, Sequence[str], None] = None
@@ -22,12 +15,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create qa_status table for quality assurance status tracking."""
     from sqlalchemy import inspect
-    
-    # Check if table already exists
+
     conn = op.get_bind()
     inspector = inspect(conn)
     existing_tables = inspector.get_table_names()
-    
+
     if 'qa_status' not in existing_tables:
         op.create_table(
             'qa_status',

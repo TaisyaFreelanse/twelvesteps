@@ -36,22 +36,17 @@ from fastapi import Header, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-# Assumes you have a setup similar to this in your database.py
-from db.database import async_session_factory 
+from db.database import async_session_factory
 from db.models import User
 
-# Dependency to get DB session
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
         yield session
 
-# Dependency to authenticate/identify user by Telegram ID
 async def get_current_user(
     x_telegram_id: str = Header(..., alias="X-Telegram-ID"),
     session: AsyncSession = Depends(get_db)
 ) -> User:
-    """
-    Authenticates a user based on the 'X-Telegram-ID' header.
     """
     stmt = select(User).where(User.telegram_id == x_telegram_id)
     result = await session.execute(stmt)
@@ -78,7 +73,6 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    # Update last_active on API interaction
     await repo.update_last_active(user.id)
     await session.commit()
 

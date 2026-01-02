@@ -17,7 +17,6 @@ from repositories.FrameRepository import FrameRepository
 from services.vector_store import VectorStoreService
 from services.profile import ProfileService
 
-# ... [Helper functions: classification_to_string, _extract_blocks_from_parts, _build_helper_prompt remain unchanged] ...
 def classification_to_string(result: ClassificationResult) -> str:
     lines = []
     for idx, part in enumerate(result.parts, 1):
@@ -54,8 +53,7 @@ def _build_helper_prompt(frames: List[FrameModel]) -> str:
 
 async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
     telegram_id_value = str(telegram_id)
-    
-    # 1. Найти или создать пользователя и получить текущий промпт
+
     async with async_session_factory() as session:
         user_repo = UserRepository(session)
         user = await user_repo.find_or_create_user_by_telegram_id(telegram_id=telegram_id_value)
@@ -63,17 +61,14 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             raise RuntimeError(f"Unable to locate or create user with telegram_id={telegram_id}")
 
         user_id = user.id
-        # Load the current personalized prompt
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
-        
-        # Load active session context (STEPS, DAY, or CHAT)
+
         from repositories.SessionContextRepository import SessionContextRepository
         from db.models import SessionType
-        
+
         session_context_repo = SessionContextRepository(session)
         active_context = await session_context_repo.get_active_context(user_id)
-        
-        # Build session context prompt if exists
+
         session_context_prompt = ""
         if active_context and active_context.context_data:
             context_data = active_context.context_data
@@ -106,23 +101,21 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
                         f"Учитывай этот контекст при ответе."
                     )
 
-    # 2. Классификация (Existing logic)
     provider = OpenAI()
     parts = await provider.classify(message)
     blocks_in_message = _extract_blocks_from_parts(parts)
-    
+
     async with async_session_factory() as session:
         frame_repo = FrameRepository(session)
         vector_store = VectorStoreService()
         openai_client = AsyncOpenAI()
-        
+
         if parts and getattr(parts, "parts", None):
             for part in parts.parts:
                 block_titles = getattr(part, "blocks", []) or []
                 if not block_titles:
                     continue
-                
-                # Save frame to database
+
                 frame = await frame_repo.add_frame(
                     content=part.part,
                     emotion=part.emotion,
@@ -136,16 +129,14 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
                     action=getattr(part, "action", None),
                     strategy_hint=getattr(part, "strategy_hint", None),
                 )
-                
-                # Create embedding and save to vector store
+
                 try:
                     embedding_response = await openai_client.embeddings.create(
                         model="text-embedding-3-small",
                         input=part.part
                     )
                     embedding = embedding_response.data[0].embedding
-                    
-                    # Save to vector store (synchronous operation)
+
                     vector_store.add_frame_embedding(
                         frame_id=frame.id,
                         content=part.part,
@@ -159,124 +150,98 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
                         }
                     )
                 except Exception as e:
-                    # Log error but don't fail the request
                     if debug:
                         print(f"[handle_chat] Error creating embedding for frame {frame.id}: {e}")
 
-        # Get frames by blocks (existing method)
         block_based_frames = await frame_repo.get_relevant_frames(
             user_id=user_id,
             block_titles=blocks_in_message,
             limit=5,
         )
-        
-        # Semantic search for frames and GPT-SELF core
+
         semantic_frames = []
         core_context = ""
         try:
-            # Create embedding for the message
             embedding_response = await openai_client.embeddings.create(
                 model="text-embedding-3-small",
                 input=message
             )
             query_embedding = embedding_response.data[0].embedding
-            
-            # Search in frames (synchronous call)
+
             semantic_results = vector_store.search_frames(
                 query_embedding=query_embedding,
                 user_id=user_id,
                 limit=5
             )
-            
-            # Get frame IDs from results
+
             if semantic_results.get("ids") and len(semantic_results["ids"][0]) > 0:
                 semantic_frame_ids = [int(frame_id) for frame_id in semantic_results["ids"][0]]
                 semantic_frames = await frame_repo.get_frames_by_ids(semantic_frame_ids)
-            
-            # Search GPT-SELF core for relevant strategies (synchronous call)
+
             if vector_store.get_core_count() > 0:
                 core_results = vector_store.search_core(
                     query_embedding=query_embedding,
                     limit=3
                 )
-                
-                # Build core context from results
+
                 if core_results.get("documents") and len(core_results["documents"][0]) > 0:
                     core_chunks = core_results["documents"][0]
                     core_context = "\n\n[Контекст из ядра GPT-SELF]:\n" + "\n---\n".join(core_chunks)
                     if debug:
                         print(f"[handle_chat] Found {len(core_chunks)} relevant core chunks")
-                        
+
         except Exception as e:
-            # Log error but don't fail the request
             if debug:
                 print(f"[handle_chat] Error in semantic search: {e}")
-        
-        # Combine and deduplicate frames
+
         all_frame_ids = set()
         relevant_frames = []
-        
-        # Add block-based frames
+
         for frame in block_based_frames:
             if frame.id not in all_frame_ids:
                 relevant_frames.append(frame)
                 all_frame_ids.add(frame.id)
-        
-        # Add semantic frames (avoid duplicates)
+
         for frame in semantic_frames:
             if frame.id not in all_frame_ids:
                 relevant_frames.append(frame)
                 all_frame_ids.add(frame.id)
-        
-        # Sort by weight and limit
+
         relevant_frames.sort(key=lambda f: f.weight or 0, reverse=True)
         relevant_frames = relevant_frames[:5]
-        
+
         await session.commit()
 
-    # 3. Подготовка промптов (Existing logic)
     system_prompt = await PromptRepository.load_system_prompt()
     helper_prompt = _build_helper_prompt(relevant_frames)
-    
-    # Add GPT-SELF core context if available
+
     if 'core_context' in locals() and core_context:
         helper_prompt = f"{helper_prompt}\n{core_context}" if helper_prompt else core_context
 
-    # 4. Загрузка истории (Existing logic)
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         last_messages = await msg_repo.get_last_messages(user_id)
 
-    # Create Assistant and Context objects
-    # Append session context to personalized prompt if exists
     full_personalized_prompt = personalized_prompt
     if 'session_context_prompt' in locals() and session_context_prompt:
         full_personalized_prompt = f"{personalized_prompt}\n{session_context_prompt}"
-    
+
     assistant = Assistant(system_prompt, full_personalized_prompt, helper_prompt)
     context = Context(message, last_messages, assistant)
     context.relevant_frames = relevant_frames
-    
-    # ==================================================================================
-    # 5. NEW: PERSONALIZATION ANALYZER & UPDATE LOGIC
-    # ==================================================================================
-    
-    # Run the analyzer to see if the profile needs updating
+
+
     analysis_result = await provider.analyze_profile(context)
     log_update_info = "Update needed: False"
-    
+
     if analysis_result.update_needed:
-        # Rewrite the prompt with new info
         new_prompt_text = await provider.update_personalized_prompt(context, analysis_result.extracted_info)
-        
+
         log_update_info = f"Update needed: True. Info: {analysis_result.extracted_info}"
-        
-        # A. Update the Context immediately so the Bot uses the new profile NOW
+
         context.assistant.personalized_prompt = new_prompt_text
-        
-        # B. Update the Database so it is remembered for next time
+
         async with async_session_factory() as session:
-            # Direct SQLAlchemy update since we have the user_id
             stmt = (
                 update(User)
                 .where(User.id == user_id)
@@ -284,19 +249,15 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
             )
             await session.execute(stmt)
             await session.commit()
-            
+
             if debug:
                 print(f"[Profile Updated] ID: {user_id} | New Info: {analysis_result.extracted_info}")
-    
-    # IMPORTANT: Always update personalized prompt with ALL answers (onboarding + profile + steps)
-    # This ensures the bot has a complete picture of the user from ALL their answers
+
     async with async_session_factory() as session:
         from services.personalization_service import update_personalized_prompt_from_all_answers
         await update_personalized_prompt_from_all_answers(session, user_id)
 
-    # ==================================================================================
-    
-    # 6. Получить ответ бота (Using potentially updated context)
+
     bot = Bot(provider)
     response = await bot.chat(context)
 
@@ -310,7 +271,6 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
     if analysis_result.update_needed:
         log.prompt_changes = str(analysis_result)
 
-    # 7. Сохранить сообщения (Existing logic)
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         try:
@@ -326,12 +286,8 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
 
 async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
     """
-    Handle /thanks command - express support, motivation, and gratitude.
-    Different from /day - focuses on support rather than analysis.
-    """
     telegram_id_value = str(telegram_id)
-    
-    # 1. Найти или создать пользователя
+
     async with async_session_factory() as session:
         user_repo = UserRepository(session)
         user = await user_repo.find_or_create_user_by_telegram_id(telegram_id=telegram_id_value)
@@ -340,19 +296,16 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
 
         user_id = user.id
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
-        
-        # Check last command to avoid duplication
+
         from repositories.SessionContextRepository import SessionContextRepository
         from db.models import SessionType
-        
+
         session_context_repo = SessionContextRepository(session)
         last_context = await session_context_repo.get_active_context(user_id, SessionType.CHAT)
-        
-        # Check if last command was /thanks (avoid duplicate responses)
+
         if last_context and last_context.context_data:
             last_command = last_context.context_data.get("last_command")
             if last_command == "/thanks":
-                # Return a variation to avoid exact duplication
                 variation_prompts = [
                     "Спасибо, что делишься благодарностью! Это важная часть выздоровления.",
                     "Твоя благодарность вдохновляет! Продолжай в том же духе.",
@@ -360,8 +313,7 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
                 ]
                 import random
                 return ChatResponse(reply=random.choice(variation_prompts), log=None)
-        
-        # Save current command in context
+
         await session_context_repo.create_or_update_context(
             user_id,
             SessionType.CHAT,
@@ -369,12 +321,10 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
         )
         await session.commit()
 
-    # 2. Load thanks-specific prompt
     thanks_prompt_json = await PromptRepository.load_thanks_prompt()
     thanks_prompt_data = json.loads(thanks_prompt_json)
     thanks_system_prompt = thanks_prompt_data.get("content", "")
 
-    # 3. Get relevant frames for context
     async with async_session_factory() as session:
         frame_repo = FrameRepository(session)
         relevant_frames = await frame_repo.get_relevant_frames(
@@ -384,25 +334,20 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
         )
         await session.commit()
 
-    # 4. Prepare prompts
     helper_prompt = _build_helper_prompt(relevant_frames)
-    
-    # 5. Load message history
+
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         last_messages = await msg_repo.get_last_messages(user_id, amount=5)
 
-    # 6. Create Assistant and Context
     assistant = Assistant(thanks_system_prompt, personalized_prompt, helper_prompt)
-    context = Context("", last_messages, assistant)  # Empty message for /thanks
+    context = Context("", last_messages, assistant)
     context.relevant_frames = relevant_frames
 
-    # 7. Generate response
     provider = OpenAI()
     bot = Bot(provider)
     response = await bot.chat(context)
 
-    # 8. Save messages
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         try:
@@ -425,15 +370,8 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
 
 async def handle_day(telegram_id: int | str, debug: bool) -> str:
     """
-    Handle /day command - analyze current state, ask questions, provide reflection.
-    Different from /thanks - focuses on analysis rather than support.
-    
-    IMPORTANT: Closes any active step Tail and switches session context to DAY
-    to prevent /day from being treated as a step answer.
-    """
     telegram_id_value = str(telegram_id)
-    
-    # 1. Найти или создать пользователя
+
     async with async_session_factory() as session:
         user_repo = UserRepository(session)
         user = await user_repo.find_or_create_user_by_telegram_id(telegram_id=telegram_id_value)
@@ -442,12 +380,11 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
 
         user_id = user.id
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
-        
-        # CRITICAL: Close any active step Tail to prevent /day from being saved as step answer
+
         from db.models import Tail, TailType
         from sqlalchemy import select
         from datetime import datetime
-        
+
         active_tail_stmt = select(Tail).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -455,27 +392,23 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
         )
         tail_result = await session.execute(active_tail_stmt)
         active_tail = tail_result.scalars().first()
-        
+
         if active_tail:
             active_tail.is_closed = True
             active_tail.closed_at = datetime.utcnow()
             if debug:
                 print(f"[handle_day] Closed active Tail {active_tail.id} for user {user_id}")
-        
-        # Switch session context to DAY
+
         from repositories.SessionContextRepository import SessionContextRepository
         from db.models import SessionType
-        
+
         session_context_repo = SessionContextRepository(session)
-        
-        # Check last command to avoid duplication
+
         last_context = await session_context_repo.get_active_context(user_id, SessionType.CHAT)
-        
-        # Check if last command was /day (avoid duplicate responses)
+
         if last_context and last_context.context_data:
             last_command = last_context.context_data.get("last_command")
             if last_command == "/day":
-                # Return a variation to avoid exact duplication
                 variation_prompts = [
                     "Как дела сегодня? Что нового происходит в твоей жизни?",
                     "Расскажи, как проходит твой день. Что ты чувствуешь?",
@@ -484,8 +417,7 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
                 import random
                 await session.commit()
                 return ChatResponse(reply=random.choice(variation_prompts), log=None)
-        
-        # Switch to DAY context (this overrides any STEPS context)
+
         await session_context_repo.create_or_update_context(
             user_id,
             SessionType.DAY,
@@ -497,12 +429,10 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
         )
         await session.commit()
 
-    # 2. Load day-specific prompt
     day_prompt_json = await PromptRepository.load_day_prompt()
     day_prompt_data = json.loads(day_prompt_json)
     day_system_prompt = day_prompt_data.get("content", "")
 
-    # 3. Get relevant frames for context
     async with async_session_factory() as session:
         frame_repo = FrameRepository(session)
         relevant_frames = await frame_repo.get_relevant_frames(
@@ -512,25 +442,20 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
         )
         await session.commit()
 
-    # 4. Prepare prompts
     helper_prompt = _build_helper_prompt(relevant_frames)
-    
-    # 5. Load message history
+
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         last_messages = await msg_repo.get_last_messages(user_id, amount=5)
 
-    # 6. Create Assistant and Context
     assistant = Assistant(day_system_prompt, personalized_prompt, helper_prompt)
-    context = Context("", last_messages, assistant)  # Empty message for /day
+    context = Context("", last_messages, assistant)
     context.relevant_frames = relevant_frames
 
-    # 7. Generate response
     provider = OpenAI()
     bot = Bot(provider)
     response = await bot.chat(context)
 
-    # 8. Save messages
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         try:
@@ -551,25 +476,21 @@ async def handle_day(telegram_id: int | str, debug: bool) -> str:
     return ChatResponse(reply=response.message, log=log)
 
 from sqlalchemy.orm import selectinload
-# Ensure these imports are present
 from db.models import Tail, TailType, SenderRole
 
 async def handle_sos(telegram_id: int | str) -> str:
     telegram_id_value = str(telegram_id)
 
     async with async_session_factory() as session:
-        # 1. Find User and Personalization
         user_repo = UserRepository(session)
         user = await user_repo.find_or_create_user_by_telegram_id(telegram_id=telegram_id_value)
-        
+
         if not user:
             raise RuntimeError(f"User not found for telegram_id={telegram_id}")
-            
+
         user_id = user.id
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or "Нет персонализации."
 
-        # 2. Determine the Question
-        # Priority 1: Check if there is an active "Step Question" in the Tail
         stmt = select(Tail).options(selectinload(Tail.question)).where(
             Tail.user_id == user_id,
             Tail.tail_type == TailType.STEP_QUESTION,
@@ -583,12 +504,10 @@ async def handle_sos(telegram_id: int | str) -> str:
         if active_tail and active_tail.question:
             question_text = active_tail.question.text
 
-        # 3. Load SOS System Prompt
         sos_system_prompt = await PromptRepository.load_sos_prompt()
 
-    # 4. Call Provider to generate example
     provider = OpenAI()
-    
+
     answer = await provider.generate_sos_response(
         system_prompt=sos_system_prompt,
         question=question_text,
@@ -604,21 +523,8 @@ async def process_profile_free_text(
     debug: bool = False
 ) -> Dict[str, Any]:
     """
-    Process free text profile story and distribute information across profile sections.
-    Uses analyze_profile to extract information and then distributes it to appropriate sections.
-    
-    Args:
-        user_id: User ID
-        free_text: Free text story from user
-        debug: Debug mode flag
-        
-    Returns:
-        Dict with status and information about processed sections
-    """
     async with async_session_factory() as session:
-        # 1. Get user and personalized prompt
         user_repo = UserRepository(session)
-        # Get user by ID using select
         from sqlalchemy import select
         from db.models import User
         stmt = select(User).where(User.id == user_id)
@@ -626,84 +532,38 @@ async def process_profile_free_text(
         user = result.scalar_one_or_none()
         if not user:
             raise RuntimeError(f"User not found with id={user_id}")
-        
+
         personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
-        
-        # 2. Get all profile sections
+
         profile_service = ProfileService(session)
         sections = await profile_service.get_all_sections(user_id)
-        
+
         if not sections:
             return {
                 "status": "error",
                 "message": "No profile sections found"
             }
-        
-        # 3. Create context for analyze_profile
+
         system_prompt = await PromptRepository.load_system_prompt()
         assistant = Assistant(system_prompt, personalized_prompt, "")
         context = Context(free_text, [], assistant)
-        
-        # 4. Use analyze_profile to extract information
+
         provider = OpenAI()
         analysis_result = await provider.analyze_profile(context)
-        
-        # Use extracted info if available, otherwise use original text
+
         extracted_info = analysis_result.extracted_info if analysis_result.extracted_info else free_text
-        
-        # If analyze_profile didn't find new info, we'll still try to distribute the text
-        # This ensures that even simple texts get saved to appropriate sections
-        
-        # 5. Use LLM to distribute information across sections
-        # Build section list for LLM
+
+
         section_names = [f"{s.name} (id: {s.id})" for s in sections]
         sections_text = "\n".join(section_names)
-        
-        distribution_prompt = f"""
-You are a Profile Information Distributor with GPT-SELF architecture.
-Analyze the following text and determine which profile sections it belongs to, extracting entities and subblocks.
 
-Available sections:
-{sections_text}
-
-User's free text:
-{free_text}
-
-Extracted information:
-{extracted_info}
-
-For each relevant section, provide:
-- section_id: The ID of the section
-- content: The part of the text that belongs to this section
-- subblock_name: (optional) Name of subblock/entity if applicable (e.g., "Юрист", "Судья", "Фриланс" for Work section)
-- entity_type: (optional) Type of entity: "profession", "role", "relationship", "hobby", "value", "trauma", "strength", etc.
-- importance: (optional) Importance from 0.0 to 1.0 (1.0 = very important, 0.5 = moderate, 0.1 = minor)
-- is_core_personality: (optional) Boolean - does this define core personality/identity?
-- tags: (optional) Comma-separated tags: emotions, triggers, tone (e.g., "радость, уверенность, вечер")
-
-Examples:
-- For "Я работал юристом 6 лет, потом стал судьей на 8 лет, сейчас фрилансер" → 3 entries:
-  {{"section_id": 7, "content": "работал юристом 6 лет", "subblock_name": "Юрист", "entity_type": "profession", "importance": 0.8, "is_core_personality": true}}
-  {{"section_id": 7, "content": "стал судьей на 8 лет", "subblock_name": "Судья", "entity_type": "profession", "importance": 0.9, "is_core_personality": true}}
-  {{"section_id": 7, "content": "сейчас фрилансер", "subblock_name": "Фриланс", "entity_type": "profession", "importance": 1.0, "is_core_personality": true}}
-
-Return a JSON object with "sections" array:
-{{
-    "sections": [
-        {{"section_id": 1, "content": "...", "subblock_name": "...", "entity_type": "...", "importance": 0.9, "is_core_personality": true, "tags": "..."}},
-        ...
-    ]
-}}
-
-If no sections are relevant, return {{"sections": []}}.
 """
-        
-        # Call LLM to distribute information
+
         import json
         from openai import AsyncOpenAI
-        
+
         config = await provider.load_config("./llm/configs/openai_dynamic.json")
-        
+
         async with AsyncOpenAI() as client:
             response = await client.chat.completions.create(
                 model=config.get("model", "gpt-4o"),
@@ -715,17 +575,15 @@ If no sections are relevant, return {{"sections": []}}.
                 temperature=0.3,
                 max_tokens=1000,
             )
-            
+
             try:
                 raw = response.choices[0].message.content
-                # LLM might return {"sections": [...]} or just [...]
                 data = json.loads(raw)
                 if isinstance(data, dict) and "sections" in data:
                     distributions = data["sections"]
                 elif isinstance(data, list):
                     distributions = data
                 elif isinstance(data, dict):
-                    # Try to find array in dict
                     for key, value in data.items():
                         if isinstance(value, list):
                             distributions = value
@@ -738,32 +596,28 @@ If no sections are relevant, return {{"sections": []}}.
                 if debug:
                     print(f"[process_profile_free_text] Error parsing distribution: {e} | Raw: {raw}")
                 distributions = []
-        
-        # 6. Save information to sections
+
         saved_sections = []
         for dist in distributions:
             section_id = dist.get("section_id")
             content = dist.get("content", "")
-            
+
             if not section_id or not content:
                 continue
-            
-            # Verify section exists
+
             section = await profile_service.get_section_detail(section_id, user_id)
             if not section:
                 if debug:
                     print(f"[process_profile_free_text] Section {section_id} not found")
                 continue
-            
+
             try:
-                # Extract metadata from distribution
                 subblock_name = dist.get("subblock_name")
                 entity_type = dist.get("entity_type")
                 importance = dist.get("importance", 1.0)
                 is_core_personality = dist.get("is_core_personality", False)
                 tags = dist.get("tags")
-                
-                # Save to section as new entry (history)
+
                 if debug:
                     print(f"[process_profile_free_text] Saving to section {section_id}: content='{content[:50]}...', subblock='{subblock_name}'")
                 section_data = await profile_service.save_free_text(
@@ -789,13 +643,11 @@ If no sections are relevant, return {{"sections": []}}.
                 if debug:
                     print(f"[process_profile_free_text] Error saving to section {section_id}: {e}")
                 continue
-        
-        # If no sections were found, save to "Свободный рассказ" section (id=14) as fallback
+
         if not saved_sections and free_text:
             try:
                 if debug:
                     print(f"[process_profile_free_text] No sections found, saving to fallback section 14")
-                # Try to find "Свободный рассказ" section (id=14)
                 free_story_section = await profile_service.get_section_detail(14, user_id)
                 if free_story_section:
                     section_data = await profile_service.save_free_text(
@@ -804,7 +656,7 @@ If no sections are relevant, return {{"sections": []}}.
                         text=free_text,
                         subblock_name=None,
                         entity_type=None,
-                        importance=0.5,  # Lower importance for unclassified text
+                        importance=0.5,
                         is_core_personality=False,
                         tags=None
                     )
@@ -825,14 +677,13 @@ If no sections are relevant, return {{"sections": []}}.
                     print(f"[process_profile_free_text] Error saving to fallback section: {e}")
                 import traceback
                 traceback.print_exc()
-        
+
         if debug:
             print(f"[process_profile_free_text] Committing session with {len(saved_sections)} saved sections")
         await session.commit()
         if debug:
             print(f"[process_profile_free_text] Session committed successfully")
-        
-        # Determine status based on whether we saved anything
+
         if len(saved_sections) == 0:
             return {
                 "status": "no_info",
@@ -840,7 +691,7 @@ If no sections are relevant, return {{"sections": []}}.
                 "saved_sections": [],
                 "extracted_info": extracted_info
             }
-        
+
         return {
             "status": "success",
             "message": f"Information distributed to {len(saved_sections)} section(s)",

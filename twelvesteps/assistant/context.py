@@ -1,5 +1,3 @@
-#todo
-#context builder with last_messages, relavant_blocks, relavant_frames, dynamic_prompt generation
 from db.models import Message
 from typing import List
 class Context:

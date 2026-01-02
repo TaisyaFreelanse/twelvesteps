@@ -1,9 +1,3 @@
-"""add_profile_section_data_history
-
-Revision ID: m9n0o1p2q3r4
-Revises: k8a9b0c1d2e3
-Create Date: 2025-01-21 12:00:00.000000
-
 """
 from typing import Sequence, Union
 
@@ -11,7 +5,6 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import String, Integer, Float, Boolean
 
-# revision identifiers, used by Alembic.
 revision: str = 'm9n0o1p2q3r4'
 down_revision: Union[str, Sequence[str], None] = 'k8a9b0c1d2e3'
 branch_labels: Union[str, Sequence[str], None] = None
@@ -20,8 +13,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add history and subblock fields to profile_section_data."""
-    # Add new columns to profile_section_data table
-    op.add_column('profile_section_data', 
+    op.add_column('profile_section_data',
         sa.Column('subblock_name', sa.String(length=255), nullable=True, comment='Название подблока (например, "Юрист", "Судья")')
     )
     op.add_column('profile_section_data',
@@ -36,16 +28,14 @@ def upgrade() -> None:
     op.add_column('profile_section_data',
         sa.Column('tags', sa.String(length=500), nullable=True, comment='Теги через запятую (эмоции, триггеры, тон)')
     )
-    
-    # Add index for faster queries by subblock
+
     op.create_index(
         'ix_profile_section_data_subblock',
         'profile_section_data',
         ['section_id', 'subblock_name'],
         unique=False
     )
-    
-    # Add index for core personality queries
+
     op.create_index(
         'ix_profile_section_data_core',
         'profile_section_data',

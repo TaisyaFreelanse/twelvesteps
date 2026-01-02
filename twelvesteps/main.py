@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from core.chat_service import handle_chat
 import asyncio
 
-load_dotenv() 
+load_dotenv()
 
 
 

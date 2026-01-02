@@ -37,7 +37,6 @@ class UserService:
                 display_name=first_name or username,
                 user_role=UserRole.dependent,
             )
-            # Set last_active for new user
             user.last_active = datetime.now(timezone.utc)
         else:
             if username and user.username != username:
@@ -46,7 +45,6 @@ class UserService:
                 user.first_name = first_name
             if not user.display_name and (first_name or username):
                 user.display_name = first_name or username
-            # Update last_active on authentication
             user.last_active = datetime.now(timezone.utc)
 
         self._ensure_api_key(user)

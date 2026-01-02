@@ -7,9 +7,9 @@ from typing import Optional
 class UserRepository():
     def __init__(self, db : AsyncSession):
         self.db = db
-    
-    
-    
+
+
+
     async def add_user(
         self,
         telegram_id,
@@ -32,7 +32,7 @@ class UserRepository():
 
 
         return new_user
-    
+
     async def find_or_create_user_by_telegram_id(
         self,
         telegram_id,
@@ -42,18 +42,17 @@ class UserRepository():
         telegram_id = str(telegram_id)
         session = self.db
         user = await self.get_by_telegram_id(telegram_id)
-        
+
         if user is None:
             print(f"Пользователь {telegram_id} не найден. Создаем нового.")
             user = await self.add_user(
-                telegram_id=telegram_id, 
+                telegram_id=telegram_id,
                 username=username,
                 first_name=first_name,
                 user_role=UserRole.dependent
             )
-            # Set last_active for new user
             user.last_active = datetime.now(timezone.utc)
-            await session.commit() 
+            await session.commit()
             print("Новый пользователь сохранен.")
         else:
             updated = False
@@ -63,16 +62,14 @@ class UserRepository():
             if first_name and user.first_name != first_name:
                 user.first_name = first_name
                 updated = True
-            
-            # Always update last_active on any interaction
+
             user.last_active = datetime.now(timezone.utc)
-            
-            # Always commit to save last_active update
+
             await session.flush()
             await session.commit()
-    
+
         return user
-    
+
     async def update_last_active(self, user_id: int) -> None:
         """Update last_active timestamp for a user."""
         stmt = update(UserModel).where(
@@ -82,7 +79,7 @@ class UserRepository():
         )
         await self.db.execute(stmt)
         await self.db.flush()
-    
+
     async def get_personalized_prompt(self, user_id : int):
         query = select(UserModel).where(UserModel.id == user_id)
         result = await self.db.execute(query)
@@ -92,7 +89,7 @@ class UserRepository():
             return user.personal_prompt
         else:
             return None
-        
+
     async def set_personalized_prompt(self, user_id : int, prompt_text : str) -> Optional[UserModel]:
         query = await select(UserModel).where(UserModel.id == user_id)
         result = await self.db.execute(query)
@@ -118,7 +115,7 @@ class UserRepository():
         query = select(UserModel).where(UserModel.telegram_id == telegram_id)
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
-    
+
     async def get_by_id(self, user_id: int) -> Optional[UserModel]:
         """Get user by ID"""
         query = select(UserModel).where(UserModel.id == user_id)

@@ -45,7 +45,6 @@ class ProfileRepository:
         self, user_id: int, name: str, icon: Optional[str] = None
     ) -> ProfileSection:
         """Create a custom section for user"""
-        # Get max order_index for user's custom sections
         query = select(func.max(ProfileSection.order_index)).where(
             ProfileSection.user_id == user_id
         )
@@ -88,11 +87,10 @@ class ProfileRepository:
         section = await self.get_section_by_id(section_id)
         if not section:
             return False
-        
-        # Only custom sections owned by the user can be deleted
+
         if not section.is_custom or section.user_id != user_id:
             return False
-        
+
         await self.db.delete(section)
         await self.db.flush()
         return True
@@ -101,7 +99,6 @@ class ProfileRepository:
         self, user_id: int, question_id: int, answer_text: str
     ) -> ProfileAnswer:
         """Save or update answer to a question"""
-        # Get latest version
         query = select(func.max(ProfileAnswer.version)).where(
             ProfileAnswer.user_id == user_id,
             ProfileAnswer.question_id == question_id
@@ -120,9 +117,9 @@ class ProfileRepository:
         return answer
 
     async def save_free_text(
-        self, 
-        user_id: int, 
-        section_id: int, 
+        self,
+        user_id: int,
+        section_id: int,
         content: str,
         subblock_name: Optional[str] = None,
         entity_type: Optional[str] = None,
@@ -130,9 +127,6 @@ class ProfileRepository:
         is_core_personality: bool = False,
         tags: Optional[str] = None
     ) -> ProfileSectionData:
-        """
-        Save free text data for a section as a NEW entry (history).
-        Instead of overwriting, creates a new record to preserve history.
         """
         data = ProfileSectionData(
             user_id=user_id,
@@ -147,7 +141,7 @@ class ProfileRepository:
         self.db.add(data)
         await self.db.flush()
         return data
-    
+
     async def get_section_data_history(
         self, user_id: int, section_id: int, limit: Optional[int] = None
     ) -> List[ProfileSectionData]:
@@ -156,13 +150,13 @@ class ProfileRepository:
             ProfileSectionData.user_id == user_id,
             ProfileSectionData.section_id == section_id
         ).order_by(ProfileSectionData.created_at.desc())
-        
+
         if limit:
             query = query.limit(limit)
-        
+
         result = await self.db.execute(query)
         return list(result.scalars().all())
-    
+
     async def get_section_data_by_subblock(
         self, user_id: int, section_id: int, subblock_name: str
     ) -> List[ProfileSectionData]:
@@ -172,7 +166,7 @@ class ProfileRepository:
             ProfileSectionData.section_id == section_id,
             ProfileSectionData.subblock_name == subblock_name
         ).order_by(ProfileSectionData.created_at.desc())
-        
+
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -181,7 +175,6 @@ class ProfileRepository:
     ) -> Optional[ProfileSectionData]:
         """Get user's latest data for a section (for backward compatibility)"""
         try:
-            # Get the most recent entry for this section
             query = select(ProfileSectionData).where(
                 ProfileSectionData.user_id == user_id,
                 ProfileSectionData.section_id == section_id
@@ -189,12 +182,9 @@ class ProfileRepository:
             result = await self.db.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
-            # If migration not applied and new columns don't exist, log and return None
-            # This allows the endpoint to work even if migration is not applied yet
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"Error loading section data for user {user_id}, section {section_id} (possibly migration not applied): {e}")
-            # Return None to indicate no data found (graceful degradation)
             return None
 
     async def get_user_answers_for_section(
@@ -212,17 +202,14 @@ class ProfileRepository:
         self, user_id: int, section_id: int
     ) -> dict:
         """Get summary statistics for a section"""
-        # Count questions
         questions_query = select(func.count(ProfileQuestion.id)).where(
             ProfileQuestion.section_id == section_id
         )
         questions_result = await self.db.execute(questions_query)
         questions_count = questions_result.scalar() or 0
 
-        # Count answers (count distinct questions that have answers)
-        # Count how many unique questions have been answered for this section
         from sqlalchemy import distinct
-        
+
         answers_query = select(func.count(distinct(ProfileAnswer.question_id))).join(
             ProfileQuestion, ProfileAnswer.question_id == ProfileQuestion.id
         ).where(
@@ -232,7 +219,6 @@ class ProfileRepository:
         answers_result = await self.db.execute(answers_query)
         answers_count = answers_result.scalar() or 0
 
-        # Get last updated
         last_updated_query = select(func.max(ProfileAnswer.created_at)).join(
             ProfileQuestion
         ).where(
@@ -242,7 +228,6 @@ class ProfileRepository:
         last_updated_result = await self.db.execute(last_updated_query)
         last_updated = last_updated_result.scalar()
 
-        # Get section name
         section = await self.get_section_by_id(section_id)
         section_name = section.name if section else ""
 
