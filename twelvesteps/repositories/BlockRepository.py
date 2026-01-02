@@ -9,7 +9,7 @@ class BlockRepository:
         self.db = db
 
     async def add_block(self, title: str) -> BlockModel:
-        """
+        """Add a new block."""
         clean_title = title.lower().strip()
 
         block = BlockModel(title=clean_title)
@@ -24,7 +24,7 @@ class BlockRepository:
         return result.scalar_one_or_none()
 
     async def get_or_create_block(self, title: str) -> BlockModel:
-        """
+        """Get existing block or create a new one."""
         clean_title = title.lower().strip()
 
         block = await self.get_block_by_title(clean_title)

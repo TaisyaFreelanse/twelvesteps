@@ -36,7 +36,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_prompt():
-        """
+        """Load SOS prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -46,7 +46,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_thanks_prompt():
-        """
+        """Load thanks prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/thanks.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -59,7 +59,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_day_prompt():
-        """
+        """Load day prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/day.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -72,7 +72,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_knowledge_base():
-        """
+        """Load knowledge base from file."""
         try:
             async with aiofiles.open("./llm/prompts/knowledge_base.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -82,7 +82,7 @@ class PromptRepository:
 
     @staticmethod
     async def get_step_knowledge(step_number: int) -> dict:
-        """
+        """Get knowledge for a specific step."""
         knowledge_base = await PromptRepository.load_knowledge_base()
         if knowledge_base and "steps" in knowledge_base:
             step_key = str(step_number)
@@ -98,7 +98,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_memory_prompt():
-        """
+        """Load SOS memory prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos_memory.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -108,7 +108,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_direction_prompt():
-        """
+        """Load SOS direction prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos_direction.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -118,7 +118,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_question_prompt():
-        """
+        """Load SOS question prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos_question.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -128,7 +128,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_support_prompt():
-        """
+        """Load SOS support prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos_support.json", "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -138,7 +138,7 @@ class PromptRepository:
 
     @staticmethod
     async def load_sos_examples_prompt():
-        """
+        """Load SOS examples prompt from file."""
         try:
             async with aiofiles.open("./llm/prompts/sos_examples.json", "r", encoding="utf-8") as f:
                 content = await f.read()

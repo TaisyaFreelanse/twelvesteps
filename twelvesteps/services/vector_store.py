@@ -10,7 +10,7 @@ class VectorStoreService:
     """Service for managing vector embeddings in ChromaDB."""
 
     def __init__(self, persist_directory: Optional[str] = None):
-        """
+        """Initialize VectorStoreService with optional persist directory."""
         if persist_directory is None:
             project_root = Path(__file__).parent.parent.parent
             persist_directory = str(project_root / "chroma_db")
@@ -40,7 +40,7 @@ class VectorStoreService:
         embedding: List[float],
         metadata: Dict[str, Any]
     ) -> None:
-        """
+        """Add a frame embedding to the vector store."""
         metadata["frame_id"] = frame_id
 
         self.frames_collection.add(

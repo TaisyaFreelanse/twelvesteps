@@ -285,7 +285,7 @@ async def handle_chat(telegram_id: int | str, message: str, debug: bool) -> str:
 
 
 async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
-    """
+    """Function docstring."""
     telegram_id_value = str(telegram_id)
 
     async with async_session_factory() as session:
@@ -368,8 +368,8 @@ async def handle_thanks(telegram_id: int | str, debug: bool) -> str:
     return ChatResponse(reply=response.message, log=log)
 
 
-async def handle_day(telegram_id: int | str, debug: bool) -> str:
-    """
+async def handle_day(telegram_id: int | str, debug: bool) -> ChatResponse:
+    """Handle /day command for daily analysis."""
     telegram_id_value = str(telegram_id)
 
     async with async_session_factory() as session:
@@ -552,9 +552,25 @@ async def process_profile_free_text(
 
         extracted_info = analysis_result.extracted_info if analysis_result.extracted_info else free_text
 
-
         section_names = [f"{s.name} (id: {s.id})" for s in sections]
         sections_text = "\n".join(section_names)
+
+        distribution_prompt = f"""Распредели следующую информацию по соответствующим разделам профиля:
+
+Информация для распределения:
+{extracted_info}
+
+Доступные разделы:
+{sections_text}
+
+Верни JSON с массивом объектов, каждый объект должен содержать:
+- section_id: ID раздела
+- content: текст для сохранения
+- subblock_name (опционально): название подблока
+- entity_type (опционально): тип сущности
+- importance (опционально): важность от 0.0 до 1.0
+- is_core_personality (опционально): является ли это ядром личности (true/false)
+- tags (опционально): теги через запятую"""
 
         import json
         from openai import AsyncOpenAI

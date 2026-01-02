@@ -92,7 +92,7 @@ class SosService:
         return None
 
     async def build_sos_prompt(self, help_type: str, step_number: int, question_text: str, user_context: Optional[str] = None, time_window: str = "за последние 72 часа") -> Optional[str]:
-        """
+        """Build SOS prompt based on help type."""
         if help_type == "direction" or help_type == "memory":
             template = await PromptRepository.load_sos_direction_prompt()
             if not template:
@@ -145,7 +145,7 @@ class SosService:
         message: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, any]:
-        """
+        """Handle SOS chat conversation."""
         user_repo = UserRepository(self.session)
         user = await user_repo.get_by_id(user_id)
         if not user:

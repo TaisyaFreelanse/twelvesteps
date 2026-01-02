@@ -11,7 +11,7 @@ from repositories.UserRepository import UserRepository
 
 
 async def update_personalized_prompt_from_all_answers(session: AsyncSession, user_id: int) -> None:
-    """
+    """Update personalized prompt from all user answers."""
     user_repo = UserRepository(session)
     personalized_prompt = await user_repo.get_personalized_prompt(user_id) or ""
 
@@ -365,8 +365,6 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
         chat_summary += "Пользователь еще не общался в обычном режиме.\n\n"
 
     complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{gratitudes_summary}\n\n{step10_summary}\n\n{chat_summary}"
-
-"""
 
     if personalized_prompt:
         personalized_prompt = re.sub(
