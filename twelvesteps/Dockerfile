@@ -19,24 +19,26 @@ COPY . .
 EXPOSE 8000
 
 # Create entrypoint script for migrations and server start
-RUN echo '#!/bin/sh\n\
-set -e\n\
-echo "Checking DATABASE_URL..."\n\
-if [ -z "$DATABASE_URL" ]; then\n\
-  echo "Error: DATABASE_URL environment variable is not set"\n\
-  exit 1\n\
-fi\n\
-echo "DATABASE_URL is set (host: $(echo $DATABASE_URL | sed -n "s/.*@\\([^:]*\\).*/\\1/p"))"\n\
-echo "Applying migrations..."\n\
-python apply_migrations_smart.py\n\
-if [ $? -ne 0 ]; then\n\
-  echo "Migration failed!"\n\
-  exit 1\n\
-fi\n\
-echo "Migrations applied successfully!"\n\
-echo "Starting API server..."\n\
-exec python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}\n\
-' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+RUN cat > /app/entrypoint.sh << 'EOF'
+#!/bin/sh
+set -e
+echo "Checking DATABASE_URL..."
+if [ -z "$DATABASE_URL" ]; then
+  echo "Error: DATABASE_URL environment variable is not set"
+  exit 1
+fi
+echo "DATABASE_URL is set"
+echo "Applying migrations..."
+python apply_migrations_smart.py
+if [ $? -ne 0 ]; then
+  echo "Migration failed!"
+  exit 1
+fi
+echo "Migrations applied successfully!"
+echo "Starting API server..."
+exec python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+EOF
+RUN chmod +x /app/entrypoint.sh
 
 CMD ["/app/entrypoint.sh"]
 
