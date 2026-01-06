@@ -1653,17 +1653,8 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
     data = callback.data
     telegram_id = callback.from_user.id
 
-    import json
-    with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "A", "location": "handlers.py:1678", "message": "handle_profile_settings_callback called", "data": {"telegram_id": telegram_id, "callback_data": data}, "timestamp": __import__("time").time() * 1000}) + "\n")
-
     try:
-        with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "B", "location": "handlers.py:1681", "message": "Checking callback data", "data": {"data": data, "is_back": data == "profile_settings_back", "is_about": data == "profile_settings_about"}, "timestamp": __import__("time").time() * 1000}) + "\n")
-
         if data == "profile_settings_back":
-            with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "C", "location": "handlers.py:1683", "message": "Handling profile_settings_back", "data": {}, "timestamp": __import__("time").time() * 1000}) + "\n")
             await callback.message.edit_text(
                 "⚙️ Настройки\n\n"
                 "Выбери раздел настроек:",
@@ -1673,24 +1664,170 @@ async def handle_profile_settings_callback(callback: CallbackQuery, state: FSMCo
             return
 
         if data == "profile_settings_about":
-            with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "handlers.py:1693", "message": "Handling profile_settings_about", "data": {}, "timestamp": __import__("time").time() * 1000}) + "\n")
             await callback.answer("Загружаю меню...")
             await callback.message.edit_text(
                 "🪪 Расскажи о себе\n\n"
                 "Выбери способ:",
                 reply_markup=build_about_me_main_markup()
             )
-            with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "D", "location": "handlers.py:1699", "message": "profile_settings_about completed successfully", "data": {}, "timestamp": __import__("time").time() * 1000}) + "\n")
             return
 
-        with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "E", "location": "handlers.py:1701", "message": "Unknown callback data, answering with default", "data": {"data": data}, "timestamp": __import__("time").time() * 1000}) + "\n")
+        if data == "profile_settings_info":
+            await callback.answer("Загружаю информацию...")
+            username = callback.from_user.username
+            first_name = callback.from_user.first_name
+            
+            try:
+                token = await get_or_fetch_token(telegram_id, username, first_name)
+                if not token:
+                    await callback.message.edit_text(
+                        "❌ Ошибка авторизации. Нажми /start.",
+                        reply_markup=build_profile_settings_markup()
+                    )
+                    return
+                
+                sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+                sections = sections_data.get("sections", []) if sections_data else []
+                
+                if not sections:
+                    text = "📋 Информация обо мне\n\n" \
+                           "Пока нет сохраненной информации.\n\n" \
+                           "Ты можешь добавить информацию через раздел 'Расскажи о себе'."
+                    await callback.message.edit_text(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")]
+                        ])
+                    )
+                    return
+                
+                text_parts = ["📋 Информация обо мне\n"]
+                buttons = []
+                
+                for section in sections:
+                    section_id = section.get("id")
+                    section_name = section.get("name", "Раздел")
+                    section_icon = section.get("icon", "📁")
+                    
+                    section_detail = await BACKEND_CLIENT.get_section_detail(token, section_id)
+                    if not section_detail:
+                        continue
+                    
+                    section_info = section_detail.get("section", {})
+                    questions = section_info.get("questions", [])
+                    entries = section_info.get("entries", [])
+                    
+                    answers_data = await BACKEND_CLIENT.get_user_answers_for_section(token, section_id)
+                    answers = answers_data.get("answers", []) if answers_data else []
+                    
+                    has_content = len(answers) > 0 or len(entries) > 0
+                    
+                    if has_content:
+                        status = f"✅ {len(answers)} ответов"
+                        if entries:
+                            status += f", {len(entries)} записей"
+                    else:
+                        status = "📝 Не заполнено"
+                    
+                    text_parts.append(f"\n{section_icon} {section_name}: {status}")
+                    
+                    if has_content:
+                        buttons.append([InlineKeyboardButton(
+                            text=f"{section_icon} {section_name}",
+                            callback_data=f"profile_settings_view_{section_id}"
+                        )])
+                
+                text_parts.append("\n\nНажми на раздел, чтобы посмотреть детали.")
+                
+                buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")])
+                
+                await callback.message.edit_text(
+                    "".join(text_parts),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                )
+            except Exception as e:
+                logger.exception("Error loading profile info: %s", e)
+                await callback.message.edit_text(
+                    "❌ Ошибка загрузки информации. Попробуй позже.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="◀️ Назад", callback_data="profile_settings_back")]
+                    ])
+                )
+            return
+
+        if data == "profile_settings_back":
+            await callback.message.edit_text(
+                "🪪 Мой профиль\n\n"
+                "Настройки профиля:",
+                reply_markup=build_profile_settings_markup()
+            )
+            await callback.answer()
+            return
+
+        if data.startswith("profile_settings_view_"):
+            section_id = data.replace("profile_settings_view_", "")
+            await callback.answer("Загружаю раздел...")
+            username = callback.from_user.username
+            first_name = callback.from_user.first_name
+            
+            try:
+                token = await get_or_fetch_token(telegram_id, username, first_name)
+                if not token:
+                    await callback.answer("Ошибка авторизации")
+                    return
+                
+                section_detail = await BACKEND_CLIENT.get_section_detail(token, int(section_id))
+                if not section_detail:
+                    await callback.answer("Раздел не найден")
+                    return
+                
+                section_info = section_detail.get("section", {})
+                section_name = section_info.get("name", "Раздел")
+                section_icon = section_info.get("icon", "📁")
+                questions = section_info.get("questions", [])
+                entries = section_info.get("entries", [])
+                
+                answers_data = await BACKEND_CLIENT.get_user_answers_for_section(token, int(section_id))
+                answers = answers_data.get("answers", []) if answers_data else []
+                
+                text_parts = [f"{section_icon} {section_name}\n"]
+                
+                if answers:
+                    text_parts.append("\n📝 Ответы на вопросы:\n")
+                    for answer in answers[:5]:
+                        q_text = answer.get("question_text", "Вопрос")[:50]
+                        a_text = answer.get("answer_text", "")[:100]
+                        text_parts.append(f"• {q_text}...\n  ➜ {a_text}...\n")
+                    if len(answers) > 5:
+                        text_parts.append(f"... и ещё {len(answers) - 5} ответов\n")
+                
+                if entries:
+                    text_parts.append("\n📄 Записи:\n")
+                    for entry in entries[:3]:
+                        content = entry.get("content", "")[:100]
+                        text_parts.append(f"• {content}...\n")
+                    if len(entries) > 3:
+                        text_parts.append(f"... и ещё {len(entries) - 3} записей\n")
+                
+                if not answers and not entries:
+                    text_parts.append("\nПока нет сохраненной информации в этом разделе.")
+                
+                buttons = [
+                    [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"profile_section_{section_id}")],
+                    [InlineKeyboardButton(text="◀️ Назад к списку", callback_data="profile_settings_info")]
+                ]
+                
+                await callback.message.edit_text(
+                    "".join(text_parts),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+                )
+            except Exception as e:
+                logger.exception("Error viewing section: %s", e)
+                await callback.answer("Ошибка загрузки раздела")
+            return
+
         await callback.answer()
     except Exception as e:
-        with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "F", "location": "handlers.py:1703", "message": "Exception in handle_profile_settings_callback", "data": {"error": str(e), "error_type": type(e).__name__}, "timestamp": __import__("time").time() * 1000}) + "\n")
         logger.exception("Error in handle_profile_settings_callback: %s", e)
         try:
             await callback.answer("Ошибка. Попробуй позже.")
@@ -1762,9 +1899,6 @@ async def handle_about_callback(callback: CallbackQuery, state: FSMContext) -> N
 
     try:
         if data == "about_back":
-            import json
-            with open(r"c:\Users\Admin\Desktop\twelvesteps\twelvesteps\.cursor\debug.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": "H", "location": "handlers.py:1725", "message": "Handling about_back", "data": {}, "timestamp": __import__("time").time() * 1000}) + "\n")
             await callback.answer()
             await callback.message.edit_text(
                 "🪪 Расскажи о себе\n\n"
