@@ -366,6 +366,12 @@ async def update_personalized_prompt_from_all_answers(session: AsyncSession, use
 
     complete_profile = f"{onboarding_summary}\n{profile_summary}\n\n{steps_summary}\n\n{gratitudes_summary}\n\n{step10_summary}\n\n{chat_summary}"
 
+    instruction = """=== ИНСТРУКЦИЯ ДЛЯ БОТА ===
+Используй информацию из профиля пользователя для персонализации ответов.
+Обращайся к пользователю по имени, если оно известно.
+Учитывай опыт работы с программой и дату трезвости при формулировании ответов.
+Ссылайся на предыдущие ответы пользователя, когда это уместно."""
+
     if personalized_prompt:
         personalized_prompt = re.sub(
             r'=== ИНСТРУКЦИЯ ДЛЯ БОТА.*?===.*?(?=\n\n===|\Z)',
