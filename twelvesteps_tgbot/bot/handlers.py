@@ -1052,7 +1052,7 @@ async def handle_sos_callback(callback: CallbackQuery, state: FSMContext) -> Non
                                 BACKEND_CLIENT.sos_chat(
                                     access_token=token,
                                     help_type=help_type,
-                                    custom_text=prompt
+                                    custom_text=step_question if step_question else None
                                 ),
                                 timeout=180.0
                             )

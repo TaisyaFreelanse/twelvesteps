@@ -1888,7 +1888,7 @@ async def get_current_template_progress(
 async def get_template_fields_info(
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> TemplateFieldsInfoResponse:
-    """
+    """Get template fields information."""
     service = TemplateService(current_context.session)
 
     return TemplateFieldsInfoResponse(
@@ -1903,7 +1903,7 @@ async def cancel_template_progress(
     question_id: int,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> dict:
-    """
+    """Cancel template progress."""
     service = TemplateService(current_context.session)
     result = await service.cancel_template_filling(
         user_id=current_context.user.id,
@@ -1924,7 +1924,7 @@ async def start_step10_analysis(
     payload: Step10StartRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10StartResponse:
-    """
+    """Start step 10 daily analysis."""
     service = Step10Service(current_context.session)
     result = await service.start_analysis(
         user_id=current_context.user.id,
@@ -1954,7 +1954,7 @@ async def submit_step10_answer(
     payload: Step10SubmitAnswerRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10SubmitAnswerResponse:
-    """
+    """Submit answer for step 10 daily analysis."""
     service = Step10Service(current_context.session)
     result = await service.submit_answer(
         user_id=current_context.user.id,
@@ -1995,7 +1995,7 @@ async def pause_step10_analysis(
     payload: Step10PauseRequest,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Step10PauseResponse:
-    """
+    """Pause step 10 daily analysis."""
     service = Step10Service(current_context.session)
     result = await service.pause_analysis(
         user_id=current_context.user.id,
@@ -2037,7 +2037,7 @@ async def get_step10_progress(
     analysis_date: Optional[date] = None,
     current_context: CurrentUserContext = Depends(get_current_user)
 ) -> Optional[Step10ProgressResponse]:
-    """
+    """Get step 10 daily analysis progress."""
     service = Step10Service(current_context.session)
     result = await service.get_analysis_progress(
         user_id=current_context.user.id,

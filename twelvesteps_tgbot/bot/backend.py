@@ -538,7 +538,7 @@ class BackendClient:
     async def start_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
+        """Start template progress for a step and question."""
         try:
             data = await self._request(
                 "POST",
@@ -569,6 +569,7 @@ class BackendClient:
     async def pause_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
+        """Pause template progress for a step and question."""
         try:
             data = await self._request(
                 "POST",
@@ -584,7 +585,7 @@ class BackendClient:
     async def get_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
+        """Get current template progress for a step and question."""
         try:
             data = await self._request(
                 "GET",
@@ -603,7 +604,7 @@ class BackendClient:
     async def cancel_template_progress(
         self, token: str, step_id: int, question_id: int
     ) -> bool:
-        """
+        """Cancel template progress for a step and question."""
         try:
             await self._request(
                 "DELETE",
@@ -616,7 +617,7 @@ class BackendClient:
             return False
 
     async def get_template_fields_info(self, token: str) -> Optional[Dict[str, Any]]:
-        """
+        """Function docstring."""
         try:
             data = await self._request(
                 "GET",
