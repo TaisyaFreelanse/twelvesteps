@@ -106,6 +106,10 @@ def build_profile_sections_markup(sections: List[Dict[str, Any]]) -> InlineKeybo
         InlineKeyboardButton(text="✍️ Свободный рассказ", callback_data="profile_free_text"),
         InlineKeyboardButton(text="➕ Добавить свой блок", callback_data="profile_custom_section")
     ])
+    
+    buttons.append([
+        InlineKeyboardButton(text="📋 Информация обо мне", callback_data="profile_my_info")
+    ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -691,6 +695,17 @@ def build_thanks_history_markup(page: int = 1, has_more: bool = False) -> Inline
     if nav_row:
         buttons.append(nav_row)
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="thanks_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_thanks_input_markup() -> InlineKeyboardMarkup:
+    """Markup shown while user is typing gratitude entry."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💾 Сохранить", callback_data="thanks_save"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="thanks_cancel")
+        ]
+    ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

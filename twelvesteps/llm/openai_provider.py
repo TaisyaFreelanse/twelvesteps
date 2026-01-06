@@ -76,8 +76,8 @@ class OpenAI(Provider):
 
 
     async def generate_sos_response(self, system_prompt: str, question: str, personalization: str) -> str:
+        """Generate SOS response example for user."""
         config = await self.load_config("./llm/configs/openai_dynamic.json")
-        """
         messages = [
             {"role": "system", "content": system_prompt},
             {
@@ -100,12 +100,13 @@ class OpenAI(Provider):
         return response.choices[0].message.content
 
     async def analyze_profile(self, context: Context) -> ProfileAnalysis:
-        """
+        """Analyze user message to extract profile information."""
         config = await self.load_config("./llm/configs/openai_dynamic.json")
-
-        """
-
-        """
+        prompt_json = await PromptRepository.load_include_prompt()
+        prompt_data = json.loads(prompt_json)
+        system_prompt = prompt_data.get("prompt", "")
+        
+        user_input_block = f"User message: {context.message}\n\nCurrent profile: {context.assistant.personalized_prompt[:500] if context.assistant.personalized_prompt else 'Empty'}"
 
         messages = [
             self._format_message("system", system_prompt),
@@ -130,9 +131,11 @@ class OpenAI(Provider):
             return ProfileAnalysis(update_needed=False, extracted_info=None, reason="Error parsing")
 
     async def update_personalized_prompt(self, context: Context, new_info: str) -> str:
+        """Update personalized prompt with new information."""
         config = await self.load_config("./llm/configs/openai_dynamic.json")
-
-        system_prompt = await PromptRepository.load_update_prompt()
+        prompt_json = await PromptRepository.load_update_prompt()
+        prompt_data = json.loads(prompt_json)
+        system_prompt = prompt_data.get("prompt", "")
 
         messages = self._format_profile_task(system_prompt, new_info)
 

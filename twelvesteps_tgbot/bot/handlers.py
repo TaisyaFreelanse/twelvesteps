@@ -68,6 +68,7 @@ from bot.config import (
     build_progress_view_answers_questions_markup,
     build_thanks_menu_markup,
     build_thanks_history_markup,
+    build_thanks_input_markup,
     build_feelings_categories_markup,
     build_feelings_list_markup,
     build_all_feelings_markup,
@@ -2180,12 +2181,60 @@ async def handle_thanks_callback(callback: CallbackQuery, state: FSMContext) -> 
 
     if data == "thanks_add":
         await state.set_state(ThanksStates.adding_entry)
+        await state.update_data(gratitude_text="")
         await callback.message.edit_text(
             "🙏 Добавить благодарность\n\n"
             "Напиши за что ты сегодня благодарен.\n\n"
-            "Можно написать 3-4 вещи через запятую или отдельными строками."
+            "Можно написать 3-4 вещи через запятую или отдельными строками.\n\n"
+            "После ввода текста нажми кнопку '💾 Сохранить'.",
+            reply_markup=build_thanks_input_markup()
         )
         await callback.answer()
+        return
+    
+    if data == "thanks_save":
+        state_data = await state.get_data()
+        gratitude_text = state_data.get("gratitude_text", "").strip()
+        
+        if not gratitude_text:
+            await callback.answer("Сначала напиши текст благодарности", show_alert=True)
+            return
+        
+        try:
+            token = await get_or_fetch_token(telegram_id, callback.from_user.username, callback.from_user.first_name)
+            if not token:
+                await callback.answer("Ошибка авторизации", show_alert=True)
+                return
+            
+            await BACKEND_CLIENT.create_gratitude(token, gratitude_text)
+            
+            try:
+                backend_reply = await BACKEND_CLIENT.thanks(telegram_id=telegram_id, debug=False)
+                reply_text = backend_reply.reply if backend_reply else "Благодарность сохранена! 🙏"
+            except Exception:
+                reply_text = "✅ Благодарность записана! 🙏\n\nПродолжай в том же духе!"
+            
+            await state.clear()
+            await callback.message.edit_text(
+                f"✅ Сохранено!\n\n{gratitude_text}\n\n{reply_text}\n\n"
+                "Ты можешь посмотреть все свои благодарности в разделе '🗃️ История'.",
+                reply_markup=build_thanks_menu_markup()
+            )
+            await callback.answer("✅ Благодарность сохранена!")
+        except Exception as e:
+            logger.exception("Error saving gratitude: %s", e)
+            await callback.answer("❌ Ошибка при сохранении. Попробуй ещё раз.", show_alert=True)
+        return
+    
+    if data == "thanks_cancel":
+        await state.clear()
+        await callback.message.edit_text(
+            "🙏 Благодарности\n\n"
+            "Благодарность помогает переключить мышление и снизить тревогу.\n\n"
+            "Записывай за что ты благодарен — это может быть что угодно.",
+            reply_markup=build_thanks_menu_markup()
+        )
+        await callback.answer("Отменено")
         return
 
     if data == "thanks_history":
@@ -2250,40 +2299,22 @@ async def handle_thanks_callback(callback: CallbackQuery, state: FSMContext) -> 
 
 
 async def handle_thanks_entry_input(message: Message, state: FSMContext) -> None:
-    """Handle input for gratitude entry"""
-    telegram_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    text = message.text
-
-    try:
-        token = await get_or_fetch_token(telegram_id, username, first_name)
-        if not token:
-            await message.answer("Ошибка авторизации")
-            await state.clear()
-            return
-
-        await BACKEND_CLIENT.create_gratitude(token, text)
-
-        try:
-            backend_reply = await BACKEND_CLIENT.thanks(telegram_id=telegram_id, debug=False)
-            reply_text = backend_reply.reply if backend_reply else "Благодарность сохранена! 🙏"
-        except Exception:
-            reply_text = "✅ Благодарность записана! 🙏\n\nПродолжай в том же духе!"
-
-        await state.clear()
-        await send_long_message(
-            message,
-            f"✅ Сохранено!\n\n{text}\n\n{reply_text}",
-            reply_markup=build_thanks_menu_markup()
-        )
-    except Exception as e:
-        logger.exception("Error saving gratitude: %s", e)
-        await state.clear()
-        await message.answer(
-            "❌ Ошибка при сохранении благодарности. Попробуй ещё раз.",
-            reply_markup=build_thanks_menu_markup()
-        )
+    """Handle input for gratitude entry - store text and show save button"""
+    text = message.text.strip()
+    
+    if not text:
+        await message.answer("Пожалуйста, напиши текст благодарности.")
+        return
+    
+    # Сохраняем текст в состояние
+    await state.update_data(gratitude_text=text)
+    
+    await send_long_message(
+        message,
+        f"📝 Текст благодарности:\n\n{text}\n\n"
+        "Нажми '💾 Сохранить' чтобы сохранить или '❌ Отмена' чтобы отменить.",
+        reply_markup=build_thanks_input_markup()
+    )
 
 
 
@@ -3121,6 +3152,105 @@ async def handle_profile_callback(callback: CallbackQuery, state: FSMContext) ->
                 logger.exception(f"Error deleting entry {entry_id}: {e}")
                 await callback.answer("❌ Ошибка при удалении")
 
+        elif data == "profile_my_info":
+            # Показать все блоки профиля с информацией
+            sections_data = await BACKEND_CLIENT.get_profile_sections(token)
+            sections = sections_data.get("sections", []) if sections_data else []
+            
+            info_text = "📋 Информация обо мне\n\n"
+            info_text += "Здесь собрана вся информация из твоего профиля.\n\n"
+            info_text += "Выбери блок, чтобы посмотреть и отредактировать информацию:\n\n"
+            
+            buttons = []
+            row = []
+            
+            for section in sections:
+                section_id = section.get("id")
+                if section_id == 14:  # Пропускаем "Свободный рассказ"
+                    continue
+                
+                name = section.get("name", "")
+                button_text = name[:30] + "..." if len(name) > 30 else name
+                
+                row.append(InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"profile_info_section_{section_id}"
+                ))
+                
+                if len(row) >= 2:
+                    buttons.append(row)
+                    row = []
+            
+            if row:
+                buttons.append(row)
+            
+            buttons.append([InlineKeyboardButton(text="⏪ Назад", callback_data="profile_back")])
+            
+            await edit_long_message(
+                callback,
+                info_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            )
+            await callback.answer()
+            return
+        
+        elif data.startswith("profile_info_section_"):
+            section_id = int(data.split("_")[-1])
+            section_data = await BACKEND_CLIENT.get_section_detail(token, section_id)
+            section = section_data.get("section", {}) if section_data else {}
+            section_name = section.get("name", "Раздел")
+            
+            # Получить ответы пользователя для этого раздела
+            answers_data = await BACKEND_CLIENT.get_user_answers_for_section(token, section_id)
+            answers = answers_data.get("answers", []) if answers_data else []
+            
+            # Получить историю записей
+            history_data = await BACKEND_CLIENT.get_section_history(token, section_id, limit=10)
+            entries = history_data.get("entries", []) if history_data else []
+            
+            info_text = f"📋 {section_name}\n\n"
+            
+            if answers:
+                info_text += "💬 Ответы на вопросы:\n\n"
+                for answer in answers[:5]:
+                    question_text = answer.get("question_text", "")
+                    answer_text = answer.get("answer_text", "")
+                    if question_text and answer_text:
+                        info_text += f"❓ {question_text}\n"
+                        info_text += f"💭 {answer_text[:200]}{'...' if len(answer_text) > 200 else ''}\n\n"
+            
+            if entries:
+                info_text += "📝 Записи:\n\n"
+                for entry in entries[:5]:
+                    content = entry.get("content", "")
+                    subblock = entry.get("subblock_name", "")
+                    if content:
+                        info_text += f"• {content[:150]}{'...' if len(content) > 150 else ''}\n"
+                        if subblock:
+                            info_text += f"  ({subblock})\n"
+                        info_text += "\n"
+            
+            if not answers and not entries:
+                info_text += "В этом разделе пока нет информации.\n\n"
+                info_text += "Ты можешь:\n"
+                info_text += "• Ответить на вопросы раздела\n"
+                info_text += "• Добавить запись вручную\n"
+                info_text += "• Написать свободный рассказ"
+            
+            buttons = [
+                [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"profile_section_{section_id}")],
+                [InlineKeyboardButton(text="🗃️ История", callback_data=f"profile_history_{section_id}")],
+                [InlineKeyboardButton(text="⏪ Назад", callback_data="profile_my_info")]
+            ]
+            
+            await edit_long_message(
+                callback,
+                info_text,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            )
+            await callback.answer()
+            return
+        
         elif data.startswith("profile_add_entry_"):
             section_id = int(data.split("_")[-1])
 
