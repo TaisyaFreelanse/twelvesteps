@@ -1932,6 +1932,12 @@ async def start_step10_analysis(
     )
     await current_context.session.commit()
 
+    if not result.get("question_data"):
+        raise HTTPException(
+            status_code=500,
+            detail="Не удалось загрузить вопросы для самоанализа. Попробуй позже."
+        )
+
     question_data = Step10QuestionData(
         number=result["question_data"]["number"],
         text=result["question_data"]["text"],

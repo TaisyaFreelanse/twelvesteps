@@ -39,7 +39,7 @@ class Step10Service:
     async def start_analysis(
         self, user_id: int, analysis_date: Optional[date] = None
     ) -> Dict[str, Any]:
-        """
+        """Start or resume step 10 daily analysis."""
         if analysis_date is None:
             analysis_date = date.today()
 
@@ -84,7 +84,7 @@ class Step10Service:
         self, user_id: int, question_number: int, answer: str,
         analysis_date: Optional[date] = None
     ) -> Dict[str, Any]:
-        """
+        """Submit answer for step 10 daily analysis."""
         if analysis_date is None:
             analysis_date = date.today()
 
